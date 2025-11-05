@@ -1,12 +1,12 @@
 {
-    "name": "TRT-Astra",
-    "version": "3.1.3",
-    "description": "Terrapin Rocket Team's Multi-Mission Flight Software. Designed to be used with any FC and any sensor suite.",
+    "name": "TRT-Astra-Rocket",
+    "version": "0.1",
+    "description": "Terrapin Rocket Team's Multi-Mission Flight Software. Redefines Astra to be specific to our rockets",
     "keywords": "Astra, TRT, Terrapin Rocket Team, Flight Software",
     "repository": 
     {
         "type": "git",
-        "url": "https://github.com/Terrapin-Rocket-Team/Multi-Mission-Flight-Software.git"
+        "url": "https://github.com/Terrapin-Rocket-Team/Astra-Rocket.git"
     },
     "authors": 
     [
@@ -15,93 +15,18 @@
             "url": "https://github.com/DrewBrandt"
         },
         {
-            "name": "Michael Mallamaci",
-            "url": "https://github.com/mallamacimj"
-        },        
-        {
-            "name": "Varun Unnithan",
-            "url": "https://github.com/varun-un"
-        },
-        {
-            "name": "Joseph Hauerstein",
-            "url": "https://github.com/jhauerst"
-        },
-        {
-            "name": "Abhi Senthilkumar",
-            "url": "https://github.com/abhi-senthilkumar"
-        },
-        {
-            "name": "Avi Komarlingam",
-            "url": "https://github.com/avikomarlingam"
-        },
-        {
-            "name": "Ramy Kaddouri",
-            "url": "https://github.com/rk234"
-        },
-        {
             "name": "Terrapin Rocket Team",
             "url": "https://github.com/Terrapin-Rocket-Team"
         }
     ],
     "license": "MIT",
-    "homepage": "https://github.com/Terrapin-Rocket-Team/Multi-Mission-Flight-Software",
+    "homepage": "https://github.com/Terrapin-Rocket-Team/Astra-Rocket",
     "dependencies": 
     [
+        
         {
-            "name": "Adafruit BMP280 Library",
-            "version": "2.6.8"
-        },
-        {
-            "name": "Adafruit BMP3XX Library",
-            "version": "2.1.4"
-        },
-        {
-            "name": "Adafruit BNO055",
-            "version": "1.6.3"
-        },
-        {
-            "name": "SparkFun u-blox GNSS v3",
-            "version": "3.1.5"
-        },
-        {
-            "name": "RTClib",
-            "owner": "adafruit"
-        },
-        {
-            "name": "Bolder Flight Systems BMI088",
-            "version": "^1.0.1",
-            "owner": "bolderflight"
-        },
-        {
-            "name": "Adafruit DPS310",
-            "version": "^1.1.4",
-            "owner": "adafruit"
-        },
-        {
-            "name": "LIS3MDL",
-            "version": "^2.0.0",
-            "owner": "pololu"
-        },
-        {
-            "name": "MS5611",
-            "version": "https://github.com/RobTillaart/MS5611.git#0.4.1"
-        },
-        {
-            "name": "LittleFS",
-	        "version": "https://github.com/PaulStoffregen/LittleFS.git#a061862589841627424170a12a246ce5660a4f0a"
-        },
-        {
-            "name": "RadioMessage",
-            "version": "https://github.com/erodarob/RadioMessage.git"
-        },
-        {
-            "name": "BMI088",
-            "version": "https://github.com/redstonee/bmi088-arduino-esp32.git"
-        },
-        {
-            "name": "SdFat",
-            "version": "https://github.com/greiman/SdFat.git#2.3.0",
-            "platforms": ["espressif32", "ststm32"]
+            "name": "Astra",
+            "version": "https://github.com/Terrapin-Rocket-Team/Astra.git"
         }
     ],
     "frameworks": "arduino",
