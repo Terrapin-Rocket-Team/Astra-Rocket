@@ -35,12 +35,25 @@
     {
         "libLDFMode": "deep+",
         "libCompatMode": "strict",
-        "srcFilter": 
+        "srcFilter":
         [
             "+<*>"
         ],
         "flags": "-Wno-unknown-pragmas",
         "extraScript": "get_version.py",
-        "unflags": "-std=gnu++11"
+        "unflags": "-std=gnu++11",
+        "platforms": {
+            "native": {
+                "flags": [
+                    "-std=c++17",
+                    "-DNATIVE=1"
+                ],
+                "srcFilter": [
+                    "+<*>",
+                    "-<AstraRocket.cpp>",
+                    "-<AstraRocketConfig.cpp>"
+                ]
+            }
+        }
     }
 }

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio test:*)",
+      "Bash(python -m platformio:*)",
+      "Bash(where pio:*)",
+      "Bash(where:*)",
+      "Bash(nul)",
+      "Bash(pio run:*)",
+      "Bash(cat:*)",
+      "Bash(tr:*)",
+      "Bash(timeout 30 pio run:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
