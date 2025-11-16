@@ -56,15 +56,13 @@ void test_rocket_state_reads_barometer() {
 
     state->update();
 
-    // Check that state processed the barometer reading
-    double agl = state->getAltitudeAGL();
-    printf("RocketState AGL before setGroundLevel: %.2f m\n", agl);
-
     // Now set ground level
     state->setGroundLevel(100.0);
 
+    // Update state again to recalculate AGL with new ground level
+    state->update();
+
     double aglAfter = state->getAltitudeAGL();
-    printf("RocketState AGL after setGroundLevel(100): %.2f m\n", aglAfter);
 
     // Should be near 0
     TEST_ASSERT_TRUE(aglAfter >= -10.0 && aglAfter <= 10.0);

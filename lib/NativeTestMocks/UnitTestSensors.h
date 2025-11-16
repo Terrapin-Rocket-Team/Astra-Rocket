@@ -9,10 +9,10 @@ using namespace astra;
 class FakeBarometer : public Barometer
 {
 public:
-    FakeBarometer() : Barometer(), fakeAltSet(false), fakeAlt(0)
+    FakeBarometer() : Barometer(), fakeAlt(0), fakeAltSet(false)
     {
         initialized = true;
-        setName("FakeBarometer");
+        setName("Barometer");
     }
     ~FakeBarometer() {}
 
@@ -23,32 +23,38 @@ public:
         return true;
     }
 
-    void set(double p, double t)
+    // Override update() to prevent recalculation when altitude is set directly
+    bool update() override
     {
-        pressure = fakeP = p;
-        temp = fakeT = t;
-        fakeAltSet = false;  // Using pressure, not direct altitude
+        if (!read())
+            return false;
+        // Only calculate altitude from pressure if it wasn't set directly
+        if (!fakeAltSet) {
+            altitudeASL = calcAltitude(pressure);
+        }
+        // If altitude was set directly, altitudeASL is already correct
+        return true;
     }
 
-    // Helper to set altitude directly (calculates pressure automatically)
+    // Helper to set altitude directly
     void setAltitude(double altM)
     {
         fakeAlt = altM;
         fakeAltSet = true;
-        // Calculate corresponding pressure using standard atmosphere formula
-        // P = P0 * (1 - L*h/T0)^(g*M/R*L)
-        // Simplified: P = 101325 * (1 - h/44330)^5.255
-        pressure = fakeP = 101325.0 * pow(1.0 - altM / 44330.0, 5.255);
-        temp = fakeT = 15.0 - altM * 0.0065;  // Standard lapse rate
+        // Calculate corresponding pressure for consistency
+        fakeP = 101325.0 * pow(1.0 - altM / 44330.0, 5.255);
+        fakeT = 15.0 - altM * 0.0065;
+        pressure = fakeP;
+        temp = fakeT;
+        // Directly set the altitude in the base class
+        altitudeASL = altM;
     }
 
-    double getASLAltM()
+    void set(double p, double t)
     {
-        if (fakeAltSet) {
-            return fakeAlt;
-        }
-        // Use base class calculation from pressure
-        return Barometer::getASLAltM();
+        pressure = fakeP = p;
+        temp = fakeT = t;
+        fakeAltSet = false;
     }
 
     bool init() override

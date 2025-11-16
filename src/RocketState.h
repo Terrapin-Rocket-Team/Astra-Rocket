@@ -108,6 +108,7 @@ private:
     double groundLevelAltitude;  // MSL altitude of launch pad
     double altitudeAGL;          // Altitude above ground level
     double maxAltitudeAGL;       // Maximum altitude achieved
+    double previousAltitudeAGL;  // Previous altitude for velocity calculation
 
     // Velocity tracking
     double verticalVelocity;     // Vertical component of velocity

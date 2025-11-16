@@ -15,6 +15,7 @@ RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter)
       groundLevelAltitude(0),
       altitudeAGL(0),
       maxAltitudeAGL(0),
+      previousAltitudeAGL(0),
       verticalVelocity(0),
       maxVelocity(0),
       verticalAccel(0),
@@ -64,7 +65,8 @@ void RocketState::updateVariables() {
     State::updateVariables();
 
     // Update time in current stage
-    timeInCurrentStage = (millis() - stageStartTime) / 1000.0;
+    unsigned long currentMillis = millis();
+    timeInCurrentStage = (currentMillis - stageStartTime) / 1000.0;
 
     // Calculate rocket-specific derived values
     calculateVerticalComponents();
@@ -81,29 +83,44 @@ void RocketState::calculateVerticalComponents() {
         altitudeAGL = altitudeMSL - groundLevelAltitude;
     }
 
-    // Calculate vertical velocity (z-component in NED frame, negate for up-positive)
-    verticalVelocity = -velocity.z();
+    // Calculate vertical velocity
+    // First check if State class is calculating velocity (from filter/GPS)
+    double stateVertVel = -velocity.z();
+
+    // If State velocity is essentially zero (not being calculated),
+    // calculate from altitude changes
+    if (fabs(stateVertVel) < 0.01 && currentTime > lastTime) {
+        double dt = currentTime - lastTime;
+        if (dt > 0.001) {  // Avoid division by very small numbers
+            verticalVelocity = (altitudeAGL - previousAltitudeAGL) / dt;
+        }
+    } else {
+        // Use State class velocity
+        verticalVelocity = stateVertVel;
+    }
+
+    // Store current altitude for next iteration
+    previousAltitudeAGL = altitudeAGL;
+
+    // Get acceleration from IMU directly
+    IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
+    Vector<3> accelNED(0, 0, 0);
+    if (imu && sensorOK(imu)) {
+        accelNED = imu->getAcceleration();
+    }
 
     // Calculate vertical acceleration
     // Total acceleration magnitude in G's
-    double totalAccelMagnitude = acceleration.magnitude() / 9.81;
-
-    // For vertical acceleration, project total acceleration onto vertical axis
-    // Assuming orientation quaternion transforms from body to NED frame
-    Vector<3> gravityNED(0, 0, 9.81);  // Gravity in NED (down is positive z)
-    Vector<3> accelNED = acceleration;  // Acceleration in NED frame
+    double totalAccelMagnitude = accelNED.magnitude() / 9.81;
 
     // Vertical component (z-axis in NED, negate for up-positive)
     verticalAccel = -accelNED.z() / 9.81;
 
     // Calculate off-vertical angle
     // Angle between rocket's longitudinal axis and vertical
-    // Using orientation quaternion
-    Vector<3> verticalRef(0, 0, -1);  // Up in NED frame
-    Vector<3> rocketAxis(1, 0, 0);    // Rocket longitudinal axis in body frame
+    // Using acceleration direction as a proxy for rocket orientation
+    Vector<3> verticalRef(0, 0, -1);  // Up in NED frame (negative Z)
 
-    // Rotate rocket axis to NED frame using orientation quaternion
-    // (Simplified - actual implementation would use quaternion rotation)
     // For now, use a simple approximation based on acceleration direction
     if (totalAccelMagnitude > 0.1) {
         Vector<3> accelDir = accelNED;
@@ -116,10 +133,14 @@ void RocketState::calculateVerticalComponents() {
 }
 
 void RocketState::updateMaxValues() {
-    // Update maximum acceleration
-    double currentAccelG = acceleration.magnitude() / 9.81;
-    if (currentAccelG > maxAcceleration) {
-        maxAcceleration = currentAccelG;
+    // Update maximum acceleration - get from IMU directly
+    IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
+    if (imu && sensorOK(imu)) {
+        Vector<3> accel = imu->getAcceleration();
+        double currentAccelG = accel.magnitude() / 9.81;
+        if (currentAccelG > maxAcceleration) {
+            maxAcceleration = currentAccelG;
+        }
     }
 
     // Update maximum velocity
@@ -155,8 +176,8 @@ void RocketState::detectFlightStage() {
             break;
 
         case BOOST:
-            // Detect motor burnout: acceleration drops below threshold
-            if (verticalAccel < BURNOUT_ACCEL_THRESHOLD) {
+            // Detect motor burnout: acceleration drops to or below threshold
+            if (verticalAccel <= BURNOUT_ACCEL_THRESHOLD) {
                 if (!lowAccelDetected) {
                     lowAccelStartTime = now;
                     lowAccelDetected = true;

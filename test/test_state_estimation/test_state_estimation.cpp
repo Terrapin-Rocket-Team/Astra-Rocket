@@ -55,6 +55,7 @@ void test_ground_level_initialization() {
 
     // Set ground level to current altitude
     state->setGroundLevel(100.0);
+    state->update();  // Update to recalculate AGL
 
     // AGL should be approximately 0 when at ground level
     double agl = state->getAltitudeAGL();
@@ -62,12 +63,12 @@ void test_ground_level_initialization() {
 }
 
 void test_altitude_agl_calculation() {
-    // Set ground level at sea level
-    state->setGroundLevel(0.0);
-
     // Set barometer to 500m altitude
     fakeBaro.setAltitude(500.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+
+    // Set ground level at sea level
+    state->setGroundLevel(0.0);
     state->update();
 
     // AGL should be approximately 500m
@@ -76,12 +77,12 @@ void test_altitude_agl_calculation() {
 }
 
 void test_altitude_agl_with_elevated_ground_level() {
-    // Set ground level at 1000m MSL
-    state->setGroundLevel(1000.0);
-
     // Set barometer to 1500m MSL
     fakeBaro.setAltitude(1500.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+
+    // Set ground level at 1000m MSL
+    state->setGroundLevel(1000.0);
     state->update();
 
     // AGL should be approximately 500m
@@ -166,12 +167,12 @@ void test_max_velocity_tracking() {
 }
 
 void test_apogee_estimate_during_boost() {
-    state->setGroundLevel(0.0);
-    state->setFlightStage(FlightStage::BOOST);
-
     // Update with high acceleration at 100m altitude
     fakeIMU.set(Vector<3>{0, 0, -40.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     fakeBaro.setAltitude(100.0);
+
+    state->setGroundLevel(0.0);
+    state->setFlightStage(FlightStage::BOOST);
     state->update();
 
     // During boost, apogee estimate should be calculated
@@ -254,11 +255,11 @@ void test_off_vertical_angle_during_boost() {
 }
 
 void test_state_getters_return_valid_values() {
-    state->setGroundLevel(0.0);
-
     // Update state with sea level altitude
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     fakeBaro.setAltitude(0.0);
+
+    state->setGroundLevel(0.0);
     state->update();
 
     // Test all getters return reasonable values
