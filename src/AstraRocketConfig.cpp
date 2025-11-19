@@ -13,6 +13,15 @@ AstraRocketConfig::AstraRocketConfig()
       apogeeVelocityThreshold(2.0),
       landingVelocityThreshold(1.0),
       landingDetectDuration(3000),
+      #if defined(ENV_STM)
+      storageBackend(StorageBackend::EMMC),
+      #elif defined(ENV_TEENSY)
+      storageBackend(StorageBackend::SD_SDIO),
+      #elif defined(ENV_ESP)
+      storageBackend(StorageBackend::SD_SPI),
+      #else
+      #error "Unsupported platform: No storage backend default defined"
+      #endif
       sdCardCS(-1),  // Will be set to BUILTIN_SDCARD or specific pin by user
       preflightLogRate(1.0),
       flightLogRate(50.0),
@@ -74,6 +83,12 @@ AstraRocketConfig& AstraRocketConfig::withLandingVelocityThreshold(double veloci
 
 AstraRocketConfig& AstraRocketConfig::withLandingDetectDuration(unsigned long durationMs) {
     landingDetectDuration = durationMs;
+    return *this;
+}
+
+// Storage configuration
+AstraRocketConfig& AstraRocketConfig::withStorageBackend(StorageBackend backend) {
+    storageBackend = backend;
     return *this;
 }
 

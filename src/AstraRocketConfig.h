@@ -6,6 +6,7 @@
 #include <Sensors/GPS/GPS.h>
 #include <Sensors/IMU/IMU.h>
 #include <Sensors/Accel/Accel.h>
+#include <RecordData/Storage/IStorage.h>
 
 using namespace astra;
 
@@ -88,6 +89,17 @@ public:
      */
     AstraRocketConfig& withLandingDetectDuration(unsigned long durationMs);
 
+    // ===== Storage Configuration =====
+
+    /**
+     * Set storage backend type
+     * Platform defaults:
+     * - STM32: EMMC
+     * - Teensy: SD_SDIO
+     * - ESP32: SD_SPI
+     */
+    AstraRocketConfig& withStorageBackend(StorageBackend backend);
+
     // ===== Logging Configuration =====
 
     /**
@@ -160,6 +172,7 @@ public:
     double getLandingVelocityThreshold() const { return landingVelocityThreshold; }
     unsigned long getLandingDetectDuration() const { return landingDetectDuration; }
 
+    StorageBackend getStorageBackend() const { return storageBackend; }
     int getSDCardCS() const { return sdCardCS; }
     double getPreflightLogRate() const { return preflightLogRate; }
     double getFlightLogRate() const { return flightLogRate; }
@@ -186,6 +199,9 @@ private:
     double apogeeVelocityThreshold;
     double landingVelocityThreshold;
     unsigned long landingDetectDuration;
+
+    // Storage configuration
+    StorageBackend storageBackend;
 
     // Logging configuration
     int sdCardCS;

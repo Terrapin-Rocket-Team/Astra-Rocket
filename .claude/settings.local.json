@@ -9,7 +9,10 @@
       "Bash(pio run:*)",
       "Bash(cat:*)",
       "Bash(tr:*)",
-      "Bash(timeout 30 pio run:*)"
+      "Bash(timeout 30 pio run:*)",
+      "Bash(git fetch:*)",
+      "Bash(pio boards:*)",
+      "Bash(pio lib search:*)"
     ],
     "deny": [],
     "ask": []
