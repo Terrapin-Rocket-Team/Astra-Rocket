@@ -95,8 +95,8 @@ public:
      * Set storage backend type
      * Platform defaults:
      * - STM32: EMMC
-     * - Teensy: SD_SDIO
-     * - ESP32: SD_SPI
+     * - Teensy: SD_CARD (SDIO via SdFat)
+     * - ESP32: SD_CARD (SDMMC 4-bit)
      */
     AstraRocketConfig& withStorageBackend(StorageBackend backend);
 

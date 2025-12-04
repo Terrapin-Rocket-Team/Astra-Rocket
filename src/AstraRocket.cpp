@@ -1,5 +1,6 @@
 #include "AstraRocket.h"
 #include <RecordData/Logging/EventLogger.h>
+#include <RecordData/Logging/DataLogger.h>
 
 // Include all possible sensor implementations for auto-detection
 #include <Sensors/Baro/DPS368.h>
@@ -8,8 +9,11 @@
 #include <Sensors/GPS/SAM_M8Q.h>
 #include <Sensors/IMU/BMI088andLIS3MDL.h>
 #include <Sensors/IMU/BNO055.h>
+#include <Sensors/Accel/BMI088Accel.h>
 #include <Sensors/Accel/ADXL375.h>
 #include <Sensors/Accel/H3LIS331DL.h>
+#include <Sensors/Gyro/BMI088Gyro.h>
+#include <Sensors/Mag/LIS3MDL.h>
 
 namespace astra_rocket {
 
@@ -19,6 +23,9 @@ AstraRocket::AstraRocket()
       barometer(nullptr),
       gps(nullptr),
       imu(nullptr),
+      accel(nullptr),
+      gyro(nullptr),
+      mag(nullptr),
       highGAccel(nullptr),
       sensorArray(nullptr),
       numSensors(0),
@@ -40,6 +47,9 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
       barometer(nullptr),
       gps(nullptr),
       imu(nullptr),
+      accel(nullptr),
+      gyro(nullptr),
+      mag(nullptr),
       highGAccel(nullptr),
       sensorArray(nullptr),
       numSensors(0),
@@ -73,11 +83,8 @@ bool AstraRocket::init() {
         return false;
     }
 
-    // Initialize all sensors
-    if (!initializeSensors()) {
-        LOGE("Sensor initialization failed!");
-        return false;
-    }
+    // Note: Sensors will be initialized by Astra::init() -> State::begin()
+    // No need to initialize them manually here
 
     // Create rocket state with detected sensors
     rocketState = new RocketState(sensorArray, numSensors, nullptr);
@@ -86,7 +93,8 @@ bool AstraRocket::init() {
     // Configure base Astra system
     config.getAstraConfig()->withState(rocketState);
     config.getAstraConfig()->withUpdateRate(50.0);  // 50 Hz default
-    config.getAstraConfig()->withLoggingRate(config.getPreflightLogRate());
+    config.getAstraConfig()->withLoggingRate(1.0);  // 1 Hz for testing/debugging
+    config.getAstraConfig()->withDataLogs(dataSinks, numDataSinks);
 
     // Configure BlinkBuzz for status indicators
     if (config.getBuzzerFeedback()) {
@@ -97,7 +105,7 @@ bool AstraRocket::init() {
     // Create Astra system
     astraSys = new Astra(config.getAstraConfig());
     astraSys->init();
-    LOGI("Astra system initialized successfully");
+    LOGI("Astra system initialized successfully. Reading sensors to establish baseline.");
 
     // Establish ground level reference
     // Wait a moment for barometer to stabilize
@@ -120,6 +128,7 @@ bool AstraRocket::init() {
 
 void AstraRocket::update() {
     // Update Astra system (sensors, state estimation, logging)
+    // Astra handles telemetry logging automatically at the configured rate
     astraSys->update();
 
     // Check for flight stage transitions
@@ -156,9 +165,13 @@ bool AstraRocket::autoDetectSensors() {
         gps = detectGPS();
     }
 
+    // Try to use individual sensors instead of IMU (IMU is broken)
     imu = config.getIMU();
     if (!imu) {
-        imu = detectIMU();
+        // Auto-detect individual sensors
+        accel = detectAccel();
+        gyro = detectGyro();
+        mag = detectMag();
     }
 
     highGAccel = config.getHighGAccel();
@@ -172,55 +185,36 @@ bool AstraRocket::autoDetectSensors() {
 
     if (barometer) {
         sensorArray[numSensors++] = barometer;
-        LOGI("Using barometer: %s", barometer->getName());
     } else {
-        LOGW("No barometer detected!");
-    }
-
-    if (gps) {
-        sensorArray[numSensors++] = gps;
-        LOGI("Using GPS: %s", gps->getName());
-    } else {
-        LOGI("No GPS configured (optional)");
-    }
-
-    if (imu) {
-        sensorArray[numSensors++] = imu;
-        LOGI("Using IMU: %s", imu->getName());
-    } else {
-        LOGW("No IMU detected!");
-    }
-
-    if (highGAccel) {
-        sensorArray[numSensors++] = highGAccel;
-        LOGI("Using high-G accelerometer: %s", highGAccel->getName());
-    } else {
-        LOGW("No high-G accelerometer detected!");
-    }
-
-    // Require at least barometer for basic functionality
-    if (!barometer) {
         LOGE("Cannot operate without barometer!");
         return false;
     }
 
-    return true;
-}
+    if (gps) {
+        sensorArray[numSensors++] = gps;
+    }
 
-bool AstraRocket::initializeSensors() {
-    LOGI("Initializing %d sensors...", numSensors);
-
-    bool allSuccess = true;
-    for (int i = 0; i < numSensors; i++) {
-        if (!sensorArray[i]->begin()) {
-            LOGE("Failed to initialize sensor: %s", sensorArray[i]->getName());
-            allSuccess = false;
-        } else {
-            LOGI("Sensor initialized: %s", sensorArray[i]->getName());
+    // Use individual sensors instead of IMU
+    if (imu) {
+        sensorArray[numSensors++] = imu;
+    } else {
+        if (accel) {
+            sensorArray[numSensors++] = accel;
+        }
+        if (gyro) {
+            sensorArray[numSensors++] = gyro;
+        }
+        if (mag) {
+            sensorArray[numSensors++] = mag;
         }
     }
 
-    return allSuccess;
+    if (highGAccel) {
+        sensorArray[numSensors++] = highGAccel;
+    }
+
+    LOGI("Sensor configuration complete: %d sensors ready", numSensors);
+    return true;
 }
 
 void AstraRocket::setupLogging() {
@@ -233,11 +227,23 @@ void AstraRocket::setupLogging() {
     dataSinks[numDataSinks++] = usbLog;
     eventSinks[numEventSinks++] = usbLog;
 
+    // SD card log for data recording
+    FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
+    FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
+
+
+    eventSinks[numEventSinks++] = sdEventLog;
+    dataSinks[numDataSinks++] = sdDataLog;
+
     // Configure EventLogger
     EventLogger::configure(eventSinks, numEventSinks);
 
-    // DataLogger will be configured after sensors are created
-    LOGI("Logging configured with %d sinks", numDataSinks);
+    // Now that EventLogger is configured, log the summary
+    LOGI("Logging system initialized with %d sink(s)", numDataSinks);
+
+    // Write test messages to verify SD card is working
+    LOGI("SD card test: If you can read this in events.log, SD logging is working!");
+    LOGI("Timestamp test: %lu ms", millis());
 }
 
 void AstraRocket::handleStageTransition(FlightStage newStage) {
@@ -282,8 +288,6 @@ void AstraRocket::updateStatusIndicators() {
 // ===== Sensor Auto-Detection =====
 
 Barometer* AstraRocket::detectBarometer() {
-    LOGI("Auto-detecting barometer...");
-
     // Try DPS368 first (I2C 0x77)
     DPS368 *dps = new DPS368();
     if (dps->begin()) {
@@ -300,13 +304,11 @@ Barometer* AstraRocket::detectBarometer() {
     }
     delete bmp;
 
-    LOGW("No barometer detected");
+    LOGE("No barometer detected - required for operation");
     return nullptr;
 }
 
 GPS* AstraRocket::detectGPS() {
-    LOGI("Auto-detecting GPS...");
-
     // Try MAX-M10S
     MAX_M10S *maxm10 = new MAX_M10S();
     if (maxm10->begin()) {
@@ -323,13 +325,10 @@ GPS* AstraRocket::detectGPS() {
     }
     delete samm8;
 
-    LOGI("No GPS detected (optional)");
     return nullptr;
 }
 
 IMU* AstraRocket::detectIMU() {
-    LOGI("Auto-detecting IMU...");
-
     // Try BMI088 + LIS3MDL
     BMI088andLIS3MDL *bmi088 = new BMI088andLIS3MDL();
     if (bmi088->begin()) {
@@ -346,13 +345,46 @@ IMU* AstraRocket::detectIMU() {
     }
     delete bno;
 
-    LOGW("No IMU detected");
+    return nullptr;
+}
+
+Accel* AstraRocket::detectAccel() {
+    // Try BMI088 accelerometer
+    BMI088Accel *bmi088accel = new BMI088Accel();
+    if (bmi088accel->begin()) {
+        LOGI("Detected BMI088 accelerometer");
+        return bmi088accel;
+    }
+    delete bmi088accel;
+
+    return nullptr;
+}
+
+Gyro* AstraRocket::detectGyro() {
+    // Try BMI088 gyroscope
+    BMI088Gyro *bmi088gyro = new BMI088Gyro();
+    if (bmi088gyro->begin()) {
+        LOGI("Detected BMI088 gyroscope");
+        return bmi088gyro;
+    }
+    delete bmi088gyro;
+
+    return nullptr;
+}
+
+Mag* AstraRocket::detectMag() {
+    // Try LIS3MDL magnetometer
+    astra::LIS3MDL *lis3mdl = new astra::LIS3MDL();
+    if (lis3mdl->begin()) {
+        LOGI("Detected LIS3MDL magnetometer");
+        return lis3mdl;
+    }
+    delete lis3mdl;
+
     return nullptr;
 }
 
 Accel* AstraRocket::detectHighGAccel() {
-    LOGI("Auto-detecting high-G accelerometer...");
-
     // Try ADXL375 (I2C 0x53)
     ADXL375 *adxl = new ADXL375();
     if (adxl->begin()) {
@@ -369,7 +401,6 @@ Accel* AstraRocket::detectHighGAccel() {
     }
     delete h3lis;
 
-    LOGW("No high-G accelerometer detected");
     return nullptr;
 }
 

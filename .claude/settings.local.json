@@ -12,7 +12,10 @@
       "Bash(timeout 30 pio run:*)",
       "Bash(git fetch:*)",
       "Bash(pio boards:*)",
-      "Bash(pio lib search:*)"
+      "Bash(pio lib search:*)",
+      "Bash(timeout:*)",
+      "Bash(dir:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

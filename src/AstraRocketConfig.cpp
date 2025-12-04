@@ -16,13 +16,23 @@ AstraRocketConfig::AstraRocketConfig()
       #if defined(ENV_STM)
       storageBackend(StorageBackend::EMMC),
       #elif defined(ENV_TEENSY)
-      storageBackend(StorageBackend::SD_SDIO),
+      storageBackend(StorageBackend::SD_CARD),
       #elif defined(ENV_ESP)
-      storageBackend(StorageBackend::SD_SPI),
+      storageBackend(StorageBackend::SD_CARD),
       #else
       #error "Unsupported platform: No storage backend default defined"
       #endif
-      sdCardCS(-1),  // Will be set to BUILTIN_SDCARD or specific pin by user
+      #if defined(ENV_TEENSY)
+      // On Teensy, BUILTIN_SDCARD is typically defined as 254
+      // If not defined, we'll use 254 as a sensible default for Teensy 4.1
+      #ifdef BUILTIN_SDCARD
+      sdCardCS(BUILTIN_SDCARD),
+      #else
+      sdCardCS(254),  // Teensy 4.1 built-in SD card default
+      #endif
+      #else
+      sdCardCS(-1),  // Will be set by user if needed for other platforms
+      #endif
       preflightLogRate(1.0),
       flightLogRate(50.0),
       postflightLogRate(1.0),

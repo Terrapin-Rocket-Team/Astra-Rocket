@@ -31,16 +31,11 @@ RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter)
       lowVelocityDetected(false)
 {
     // Add rocket-specific columns to DataReporter
-    addColumn("%d", &currentStage, "Flight Stage");
-    addColumn("%0.2f", &altitudeAGL, "Alt AGL (m)");
-    addColumn("%0.2f", &verticalVelocity, "Vert Vel (m/s)");
-    addColumn("%0.3f", &verticalAccel, "Vert Accel (G)");
-    addColumn("%0.2f", &apogeeEstimate, "Apogee Est (m)");
-    addColumn("%0.2f", &timeToApogee, "Time to Apogee (s)");
-    addColumn("%0.3f", &maxAcceleration, "Max Accel (G)");
-    addColumn("%0.2f", &maxVelocity, "Max Vel (m/s)");
-    addColumn("%0.2f", &offVerticalAngle, "Off-Vert Angle (deg)");
-    addColumn("%0.2f", &timeInCurrentStage, "Time in Stage (s)");
+    insertColumn(0, "%d", &currentStage, "Flight Stage");
+    addColumn("%0.3f", &apogeeEstimate, "Apogee Est (m)");
+    addColumn("%0.3f", &timeToApogee, "Time to Apogee (s)");
+    addColumn("%0.3f", &offVerticalAngle, "Off-Vert Angle (deg)");
+    addColumn("%0.3f", &timeInCurrentStage, "Time in Stage (s)");
 }
 
 void RocketState::setGroundLevel(double altitudeMSL) {

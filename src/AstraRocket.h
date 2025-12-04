@@ -120,7 +120,10 @@ private:
     // Sensors
     Barometer *barometer;
     GPS *gps;
-    IMU *imu;
+    IMU *imu;  // Keep for backwards compatibility, but prefer individual sensors
+    Accel *accel;
+    Gyro *gyro;
+    Mag *mag;
     Accel *highGAccel;
     Sensor **sensorArray;
     int numSensors;
@@ -138,7 +141,6 @@ private:
 
     // Helper methods
     bool autoDetectSensors();
-    bool initializeSensors();
     void setupLogging();
     void handleStageTransition(FlightStage newStage);
     void updateStatusIndicators();
@@ -147,6 +149,9 @@ private:
     Barometer* detectBarometer();
     GPS* detectGPS();
     IMU* detectIMU();
+    Accel* detectAccel();
+    Gyro* detectGyro();
+    Mag* detectMag();
     Accel* detectHighGAccel();
 
     // Constants
