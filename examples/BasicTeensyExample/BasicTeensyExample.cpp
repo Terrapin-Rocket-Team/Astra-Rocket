@@ -44,8 +44,8 @@ AstraConfig config = AstraConfig()
                          .withState(&state)
                          .withUpdateRate(10)      // 10Hz sensor updates
                          .withLoggingRate(10)     // 10Hz logging rate
-                         .withBBPin(LED_PIN)
-                         .withBuzzerPin(BUZZER_PIN);
+                         .withBBPin(LED_PIN);
+                        //  .withBuzzerPin(BUZZER_PIN);
 
 // Create Astra system instance
 Astra sys(&config);
