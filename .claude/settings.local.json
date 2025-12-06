@@ -15,7 +15,9 @@
       "Bash(pio lib search:*)",
       "Bash(timeout:*)",
       "Bash(dir:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(mkdir:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
