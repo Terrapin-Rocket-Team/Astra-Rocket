@@ -7,29 +7,43 @@
  * - Sets up logging to both Serial and SD card
  * - Tracks flight stages (pad idle, boost, coast, apogee, descent, landing)
  * - Adjusts logging rates based on flight phase
+ * - Uses LED status indicators for sensor and GPS status
  *
  * AstraRocket handles all the complexity of:
  * - Sensor detection and initialization
  * - State estimation and filtering
  * - Flight stage detection
  * - Logging management
+ * - Status indicator management
+ *
+ * LED Status Indicators:
+ * - Pin 25 (Sensor Status): Solid ON = all sensors good, 2 blinks = sensor failure
+ * - Pin 26 (GPS Status): Solid ON = GPS fix, 1 blink = GPS init but no fix, OFF = no GPS
  *
  * For more advanced usage with custom configuration, see the ConfigurableExample.
  */
 
 #include <Arduino.h>
 #include <AstraRocket.h>
+#include <Sensors/GPS/MAX_M10S.h>
 
 using namespace astra_rocket;
 
-// Create AstraRocket instance with default configuration
-// Note: For Teensy 4.1, the built-in SD card will be auto-configured
-AstraRocket rocket;
+// Create a custom configuration with LED status pins
+AstraRocketConfig config = AstraRocketConfig()
+                               .withGPS(new MAX_M10S)
+                               .withSensorStatusLEDPin(32)
+                               .withGPSStatusLEDPin(31);
 
-void setup() {
+// Create AstraRocket instance with custom configuration
+// Note: For Teensy 4.1, the built-in SD card will be auto-configured
+AstraRocket rocket(config);
+
+void setup()
+{
     // Initialize Serial for debug output
     Serial.begin(115200);
-    delay(2000);  // Wait for serial connection
+    delay(2000); // Wait for serial connection
 
     Serial.println("========================================");
     Serial.println("  Basic Teensy 4.1 Sensor Example");
@@ -44,9 +58,11 @@ void setup() {
     // - Configure state estimation
     // - Establish ground level reference
     Serial.println("Initializing AstraRocket...");
-    if (!rocket.init()) {
+    if (!rocket.init())
+    {
         Serial.println("ERROR: AstraRocket initialization failed!");
-        while(1) {
+        while (1)
+        {
             delay(1000);
         }
     }
@@ -58,7 +74,8 @@ void setup() {
     Serial.println();
 }
 
-void loop() {
+void loop()
+{
     // Update the rocket system
     // This will:
     // - Read all sensors

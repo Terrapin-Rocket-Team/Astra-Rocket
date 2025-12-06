@@ -38,7 +38,9 @@ AstraRocketConfig::AstraRocketConfig()
       postflightLogRate(1.0),
       flashBackup(false),
       buzzerFeedback(true),
-      ledStatusPin(LED_BUILTIN)
+      ledStatusPin(LED_BUILTIN),
+      sensorStatusLEDPin(-1),
+      gpsStatusLEDPin(-1)
 {
     // Configure base AstraConfig with sensible defaults
     astraConfig.withUpdateRate(50.0);  // 50 Hz default update rate
@@ -136,6 +138,16 @@ AstraRocketConfig& AstraRocketConfig::withBuzzerFeedback(bool enable) {
 
 AstraRocketConfig& AstraRocketConfig::withLEDStatusPin(int pin) {
     ledStatusPin = pin;
+    return *this;
+}
+
+AstraRocketConfig& AstraRocketConfig::withSensorStatusLEDPin(int pin) {
+    sensorStatusLEDPin = pin;
+    return *this;
+}
+
+AstraRocketConfig& AstraRocketConfig::withGPSStatusLEDPin(int pin) {
+    gpsStatusLEDPin = pin;
     return *this;
 }
 

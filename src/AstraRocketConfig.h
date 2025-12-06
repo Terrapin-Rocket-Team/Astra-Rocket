@@ -146,6 +146,20 @@ public:
      */
     AstraRocketConfig& withLEDStatusPin(int pin);
 
+    /**
+     * Set sensor status LED pin
+     * Shows status of all sensors except GPS
+     * Default: -1 (disabled)
+     */
+    AstraRocketConfig& withSensorStatusLEDPin(int pin);
+
+    /**
+     * Set GPS status LED pin
+     * Shows GPS initialization and fix status
+     * Default: -1 (disabled)
+     */
+    AstraRocketConfig& withGPSStatusLEDPin(int pin);
+
     // ===== Base Astra Configuration Pass-through =====
 
     /**
@@ -181,6 +195,8 @@ public:
 
     bool getBuzzerFeedback() const { return buzzerFeedback; }
     int getLEDStatusPin() const { return ledStatusPin; }
+    int getSensorStatusLEDPin() const { return sensorStatusLEDPin; }
+    int getGPSStatusLEDPin() const { return gpsStatusLEDPin; }
 
 private:
     // Base Astra configuration
@@ -213,6 +229,8 @@ private:
     // Status indicators configuration
     bool buzzerFeedback;
     int ledStatusPin;
+    int sensorStatusLEDPin;
+    int gpsStatusLEDPin;
 };
 
 } // namespace astra_rocket

@@ -1,10 +1,12 @@
 #include "AstraRocket.h"
 #include <RecordData/Logging/EventLogger.h>
 #include <RecordData/Logging/DataLogger.h>
+#include <BlinkBuzz/BlinkBuzz.h>
 
 // Include all possible sensor implementations for auto-detection
 #include <Sensors/Baro/DPS368.h>
 #include <Sensors/Baro/BMP390.h>
+#include <Sensors/Baro/MS5611F.h>
 #include <Sensors/GPS/MAX_M10S.h>
 #include <Sensors/GPS/SAM_M8Q.h>
 #include <Sensors/IMU/BMI088andLIS3MDL.h>
@@ -100,6 +102,14 @@ bool AstraRocket::init() {
     if (config.getBuzzerFeedback()) {
         config.getAstraConfig()->withBBAsync(true);
         config.getAstraConfig()->withBBPin(config.getLEDStatusPin());
+    }
+
+    // Add sensor status and GPS status LEDs to BlinkBuzz if configured
+    if (config.getSensorStatusLEDPin() >= 0) {
+        config.getAstraConfig()->withBBPin(config.getSensorStatusLEDPin());
+    }
+    if (config.getGPSStatusLEDPin() >= 0) {
+        config.getAstraConfig()->withBBPin(config.getGPSStatusLEDPin());
     }
 
     // Create Astra system
@@ -273,7 +283,6 @@ void AstraRocket::handleStageTransition(FlightStage newStage) {
 
 void AstraRocket::updateStatusIndicators() {
     // Simple status LED pattern based on flight stage
-    // This could be expanded with BlinkBuzz patterns
     FlightStage stage = rocketState->getFlightStage();
 
     // For now, just keep LED on during flight
@@ -282,6 +291,58 @@ void AstraRocket::updateStatusIndicators() {
     } else {
         // Blink slowly on pad/landed
         digitalWrite(config.getLEDStatusPin(), (millis() / 1000) % 2);
+    }
+
+    // === Sensor Status LED ===
+    // Shows good status if all sensors (except GPS) are initialized
+    if (config.getSensorStatusLEDPin() >= 0) {
+        bool allSensorsGood = true;
+
+        // Check all sensors except GPS
+        if (barometer && !barometer->isInitialized()) allSensorsGood = false;
+        if (imu && !imu->isInitialized()) allSensorsGood = false;
+        if (accel && !accel->isInitialized()) allSensorsGood = false;
+        if (gyro && !gyro->isInitialized()) allSensorsGood = false;
+        if (mag && !mag->isInitialized()) allSensorsGood = false;
+        if (highGAccel && !highGAccel->isInitialized()) allSensorsGood = false;
+
+        if (allSensorsGood) {
+            // All sensors good - solid green (on)
+            bb.on(config.getSensorStatusLEDPin());
+        } else {
+            // Some sensor failed - blink pattern (2 quick blinks)
+            static unsigned long lastSensorUpdate = 0;
+            if (millis() - lastSensorUpdate > 2000) {
+                bb.aonoff(config.getSensorStatusLEDPin(), 100, 2, 100);
+                lastSensorUpdate = millis();
+            }
+        }
+    }
+
+    // === GPS Status LED ===
+    // Shows good if GPS init, extra good if GPS has fix
+    if (config.getGPSStatusLEDPin() >= 0) {
+        if (gps) {
+            if (gps->isInitialized()) {
+                if (gps->getHasFix()) {
+                    // GPS has fix - solid on (extra good)
+                    bb.on(config.getGPSStatusLEDPin());
+                } else {
+                    // GPS initialized but no fix - slow blink pattern
+                    static unsigned long lastGPSUpdate = 0;
+                    if (millis() - lastGPSUpdate > 1000) {
+                        bb.aonoff(config.getGPSStatusLEDPin(), 200);
+                        lastGPSUpdate = millis();
+                    }
+                }
+            } else {
+                // GPS not initialized - off
+                bb.off(config.getGPSStatusLEDPin());
+            }
+        } else {
+            // No GPS present - off
+            bb.off(config.getGPSStatusLEDPin());
+        }
     }
 }
 
@@ -293,6 +354,14 @@ Barometer* AstraRocket::detectBarometer() {
     if (dps->begin()) {
         LOGI("Detected DPS368 barometer");
         return dps;
+    }
+    delete dps;
+    
+    // Try MS5611
+    astra::MS5611 *ms5 = new astra::MS5611(0x77);
+    if (ms5->begin()) {
+        LOGI("Detected MS5611 barometer");
+        return ms5;
     }
     delete dps;
 
