@@ -7,8 +7,7 @@
 #include <Sensors/Baro/DPS368.h>
 #include <Sensors/Baro/BMP390.h>
 #include <Sensors/Baro/MS5611F.h>
-#include <Sensors/GPS/MAX_M10S.h>
-#include <Sensors/GPS/SAM_M8Q.h>
+#include <Sensors/GPS/SAM_M10Q.h>
 #include <Sensors/IMU/BMI088andLIS3MDL.h>
 #include <Sensors/IMU/BNO055.h>
 #include <Sensors/Accel/BMI088Accel.h>
@@ -37,7 +36,10 @@ AstraRocket::AstraRocket()
       numEventSinks(0),
       liftoffTime(0),
       previousStage(PAD_IDLE),
-      groundLevelAltitude(0)
+      groundLevelAltitude(0),
+      i2c_device_count(0),
+      i2c_scanned(false),
+      i2c_claimed_count(0)
 {
     // Default configuration already set in AstraRocketConfig constructor
 }
@@ -61,7 +63,10 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
       numEventSinks(0),
       liftoffTime(0),
       previousStage(PAD_IDLE),
-      groundLevelAltitude(0)
+      groundLevelAltitude(0),
+      i2c_device_count(0),
+      i2c_scanned(false),
+      i2c_claimed_count(0)
 {
 }
 
@@ -348,64 +353,126 @@ void AstraRocket::updateStatusIndicators() {
 
 // ===== Sensor Auto-Detection =====
 
-Barometer* AstraRocket::detectBarometer() {
-    // Try DPS368 first (I2C 0x77)
-    DPS368 *dps = new DPS368();
-    if (dps->begin()) {
-        LOGI("Detected DPS368 barometer");
-        return dps;
+// Helper function to check if an address has been claimed
+bool AstraRocket::isAddressClaimed(uint8_t addr) {
+    for (uint8_t i = 0; i < i2c_claimed_count; i++) {
+        if (i2c_claimed_addresses[i] == addr) {
+            return true;
+        }
     }
-    delete dps;
-    
-    // Try MS5611
-    astra::MS5611 *ms5 = new astra::MS5611(0x77);
-    if (ms5->begin()) {
-        LOGI("Detected MS5611 barometer");
-        return ms5;
-    }
-    delete dps;
+    return false;
+}
 
-    // Try BMP390 (I2C 0x76 or 0x77)
-    BMP390 *bmp = new BMP390();
-    if (bmp->begin()) {
-        LOGI("Detected BMP390 barometer");
-        return bmp;
+// Helper function to mark an address as claimed
+void AstraRocket::claimAddress(uint8_t addr) {
+    if (i2c_claimed_count < 20 && !isAddressClaimed(addr)) {
+        i2c_claimed_addresses[i2c_claimed_count++] = addr;
     }
-    delete bmp;
+}
+
+// Helper function to scan I2C bus and return list of active addresses
+void AstraRocket::scanI2CBus(uint8_t* addresses, uint8_t& count, uint8_t maxCount) {
+    // Use cached scan results if available
+    if (i2c_scanned) {
+        count = i2c_device_count;
+        for (uint8_t i = 0; i < count && i < maxCount; i++) {
+            addresses[i] = i2c_addresses[i];
+        }
+        return;
+    }
+
+    // Perform scan
+    count = 0;
+    LOGI("Scanning I2C bus...");
+
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            LOGI("  Found device at 0x%02X", addr);
+            if (count < maxCount) {
+                addresses[count++] = addr;
+            }
+        }
+    }
+
+    LOGI("I2C scan complete: %d devices found", count);
+
+    // Cache the results
+    i2c_device_count = count;
+    for (uint8_t i = 0; i < count && i < 20; i++) {
+        i2c_addresses[i] = addresses[i];
+    }
+    i2c_scanned = true;
+
+    // Give sensors time to recover from the scan before initialization
+    // BMI088 sensors are particularly sensitive to bus activity
+    // Longer delay helps with register write/readback verification issues
+    delay(200);
+
+    // Set I2C clock speed to a conservative 100 kHz for more reliable communication
+    // The BMI088 library will try to change this to 400 kHz, but starting slower may help
+    Wire.setClock(100000);
+}
+
+Barometer* AstraRocket::detectBarometer() {
+    LOGI("Auto-detecting barometer...");
+
+    // Skip I2C scan - try direct initialization at expected addresses
+    const uint8_t baro_addresses[] = {0x77, 0x76};
+
+    for (uint8_t addr : baro_addresses) {
+        // Skip if already claimed
+        if (isAddressClaimed(addr)) {
+            continue;
+        }
+
+        LOGI("Trying barometer sensors at address 0x%02X...", addr);
+
+        // Try DPS368
+        DPS368 *dps = new DPS368(addr);
+        if (dps->begin()) {
+            LOGI("Detected DPS368 barometer at 0x%02X", addr);
+            claimAddress(addr);
+            return dps;
+        }
+        delete dps;
+
+        // Try MS5611
+        astra::MS5611 *ms5 = new astra::MS5611(addr);
+        if (ms5->begin()) {
+            LOGI("Detected MS5611 barometer at 0x%02X", addr);
+            claimAddress(addr);
+            return ms5;
+        }
+        delete ms5;
+
+        // Try BMP390
+        BMP390 *bmp = new BMP390(addr);
+        if (bmp->begin()) {
+            LOGI("Detected BMP390 barometer at 0x%02X", addr);
+            claimAddress(addr);
+            return bmp;
+        }
+        delete bmp;
+    }
 
     LOGE("No barometer detected - required for operation");
     return nullptr;
 }
 
 GPS* AstraRocket::detectGPS() {
-    // Try MAX-M10S
-    MAX_M10S *maxm10 = new MAX_M10S();
-    if (maxm10->begin()) {
-        LOGI("Detected MAX-M10S GPS");
-        return maxm10;
+    // Try SAM_M10Q
+    SAM_M10Q *sam = new SAM_M10Q("SAM_M10Q");
+    if (sam->begin()) {
+        LOGI("Detected SAM_M10Q GPS");
+        return sam;
     }
-    delete maxm10;
-
-    // Try SAM-M8Q (in mmfs namespace)
-    mmfs::SAM_M8Q *samm8 = new mmfs::SAM_M8Q();
-    if (samm8->begin()) {
-        LOGI("Detected SAM-M8Q GPS");
-        return samm8;
-    }
-    delete samm8;
+    delete sam;
 
     return nullptr;
 }
 
 IMU* AstraRocket::detectIMU() {
-    // Try BMI088 + LIS3MDL
-    BMI088andLIS3MDL *bmi088 = new BMI088andLIS3MDL();
-    if (bmi088->begin()) {
-        LOGI("Detected BMI088+LIS3MDL IMU");
-        return bmi088;
-    }
-    delete bmi088;
-
     // Try BNO055
     BNO055 *bno = new BNO055();
     if (bno->begin()) {
@@ -418,58 +485,133 @@ IMU* AstraRocket::detectIMU() {
 }
 
 Accel* AstraRocket::detectAccel() {
-    // Try BMI088 accelerometer
-    BMI088Accel *bmi088accel = new BMI088Accel();
-    if (bmi088accel->begin()) {
-        LOGI("Detected BMI088 accelerometer");
-        return bmi088accel;
-    }
-    delete bmi088accel;
+    LOGI("Auto-detecting accelerometer...");
 
+    // Skip I2C scan - try direct initialization at expected addresses
+    // This avoids potential timing issues from bus scanning
+    const uint8_t accel_addresses[] = {0x18, 0x19};
+
+    for (uint8_t addr : accel_addresses) {
+        // Skip if already claimed
+        if (isAddressClaimed(addr)) {
+            continue;
+        }
+
+        LOGI("Trying accelerometer at address 0x%02X...", addr);
+
+        // Try BMI088 accelerometer
+        BMI088Accel *bmi088accel = new BMI088Accel(Wire, addr);
+        int result = bmi088accel->begin();
+        if (result > 0) {
+            LOGI("Detected BMI088 accelerometer at 0x%02X", addr);
+            claimAddress(addr);
+            return bmi088accel;
+        } else {
+            LOGW("BMI088 accel init failed at 0x%02X with error code: %d", addr, result);
+        }
+        delete bmi088accel;
+    }
+
+    LOGW("No accelerometer detected");
     return nullptr;
 }
 
 Gyro* AstraRocket::detectGyro() {
-    // Try BMI088 gyroscope
-    BMI088Gyro *bmi088gyro = new BMI088Gyro();
-    if (bmi088gyro->begin()) {
-        LOGI("Detected BMI088 gyroscope");
-        return bmi088gyro;
-    }
-    delete bmi088gyro;
+    LOGI("Auto-detecting gyroscope...");
 
+    // Give extra time after accelerometer init (BMI088 sensors share timing issues)
+    delay(50);
+
+    // Skip I2C scan - try direct initialization at expected addresses
+    const uint8_t gyro_addresses[] = {0x68, 0x69};
+
+    for (uint8_t addr : gyro_addresses) {
+        // Skip if already claimed
+        if (isAddressClaimed(addr)) {
+            continue;
+        }
+
+        LOGI("Trying gyroscope at address 0x%02X...", addr);
+
+        // Try BMI088 gyroscope
+        BMI088Gyro *bmi088gyro = new BMI088Gyro(Wire, addr);
+        int result = bmi088gyro->begin();
+        if (result > 0) {
+            LOGI("Detected BMI088 gyroscope at 0x%02X", addr);
+            claimAddress(addr);
+            return bmi088gyro;
+        } else {
+            LOGW("BMI088 gyro init failed at 0x%02X with error code: %d", addr, result);
+        }
+        delete bmi088gyro;
+    }
+
+    LOGW("No gyroscope detected");
     return nullptr;
 }
 
 Mag* AstraRocket::detectMag() {
-    // Try LIS3MDL magnetometer
-    astra::LIS3MDL *lis3mdl = new astra::LIS3MDL();
-    if (lis3mdl->begin()) {
-        LOGI("Detected LIS3MDL magnetometer");
-        return lis3mdl;
-    }
-    delete lis3mdl;
+    LOGI("Auto-detecting magnetometer...");
 
+    // Skip I2C scan - try direct initialization at expected addresses
+    const uint8_t mag_addresses[] = {0x1C, 0x1E};
+
+    for (uint8_t addr : mag_addresses) {
+        // Skip if already claimed
+        if (isAddressClaimed(addr)) {
+            continue;
+        }
+
+        LOGI("Trying magnetometer at address 0x%02X...", addr);
+
+        // Try LIS3MDL magnetometer
+        astra::LIS3MDL *lis3mdl = new astra::LIS3MDL();
+        if (lis3mdl->begin()) {
+            LOGI("Detected LIS3MDL magnetometer at 0x%02X", addr);
+            claimAddress(addr);
+            return lis3mdl;
+        }
+        delete lis3mdl;
+    }
+
+    LOGW("No magnetometer detected");
     return nullptr;
 }
 
 Accel* AstraRocket::detectHighGAccel() {
-    // Try ADXL375 (I2C 0x53)
-    ADXL375 *adxl = new ADXL375();
-    if (adxl->begin()) {
-        LOGI("Detected ADXL375 high-G accelerometer");
-        return adxl;
-    }
-    delete adxl;
+    LOGI("Auto-detecting high-G accelerometer...");
 
-    // Try H3LIS331DL (I2C 0x18 or 0x19)
-    H3LIS331DL *h3lis = new H3LIS331DL();
-    if (h3lis->begin()) {
-        LOGI("Detected H3LIS331DL high-G accelerometer");
-        return h3lis;
-    }
-    delete h3lis;
+    // Skip I2C scan - try direct initialization at expected addresses
+    const uint8_t high_g_addresses[] = {0x1D, 0x53, 0x18, 0x19};
 
+    for (uint8_t addr : high_g_addresses) {
+        // Skip if already claimed
+        if (isAddressClaimed(addr)) {
+            continue;
+        }
+
+        LOGI("Trying high-G accelerometers at address 0x%02X...", addr);
+
+        // Try ADXL375
+        ADXL375 *adxl = new ADXL375("ADXL375", Wire, addr);
+        if (adxl->begin()) {
+            LOGI("Detected ADXL375 high-G accelerometer at 0x%02X", addr);
+            claimAddress(addr);
+            return adxl;
+        }
+        delete adxl;
+
+        // Try H3LIS331DL
+        astra::H3LIS331DL *h3lis = new astra::H3LIS331DL("H3LIS331DL", Wire, addr);
+        if (h3lis->begin()) {
+            LOGI("Detected H3LIS331DL high-G accelerometer at 0x%02X", addr);
+            claimAddress(addr);
+            return h3lis;
+        }
+        delete h3lis;
+    }
+
+    LOGW("No high-G accelerometer detected");
     return nullptr;
 }
 

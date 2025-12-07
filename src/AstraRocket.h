@@ -139,6 +139,13 @@ private:
     FlightStage previousStage;
     double groundLevelAltitude;
 
+    // I2C scan cache
+    uint8_t i2c_addresses[20];
+    uint8_t i2c_device_count;
+    bool i2c_scanned;
+    uint8_t i2c_claimed_addresses[20];  // Addresses already claimed by sensors
+    uint8_t i2c_claimed_count;
+
     // Helper methods
     bool autoDetectSensors();
     void setupLogging();
@@ -146,6 +153,9 @@ private:
     void updateStatusIndicators();
 
     // Sensor auto-detection helpers
+    void scanI2CBus(uint8_t* addresses, uint8_t& count, uint8_t maxCount);  // Scan I2C bus and return active addresses
+    bool isAddressClaimed(uint8_t addr);  // Check if address is already claimed by a sensor
+    void claimAddress(uint8_t addr);      // Mark address as claimed
     Barometer* detectBarometer();
     GPS* detectGPS();
     IMU* detectIMU();
