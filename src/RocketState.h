@@ -26,8 +26,9 @@ public:
      * @param sensors Array of sensor pointers
      * @param numSensors Number of sensors in array
      * @param filter Optional Kalman filter for state estimation
+     * @param orientationFilter Optional Mahony AHRS filter for orientation estimation
      */
-    RocketState(Sensor **sensors, int numSensors, Filter *filter = nullptr);
+    RocketState(Sensor **sensors, int numSensors, Filter *filter = nullptr, MahonyAHRS *orientationFilter = nullptr);
 
     /**
      * Get current flight stage

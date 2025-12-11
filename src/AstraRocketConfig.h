@@ -160,6 +160,15 @@ public:
      */
     AstraRocketConfig& withGPSStatusLEDPin(int pin);
 
+    // ===== HITL (Hardware-In-The-Loop) Configuration =====
+
+    /**
+     * Enable HITL simulation mode
+     * When enabled, uses simulated sensors instead of hardware
+     * Default: false
+     */
+    AstraRocketConfig& withHITL(bool enable);
+
     // ===== Base Astra Configuration Pass-through =====
 
     /**
@@ -198,6 +207,8 @@ public:
     int getSensorStatusLEDPin() const { return sensorStatusLEDPin; }
     int getGPSStatusLEDPin() const { return gpsStatusLEDPin; }
 
+    bool getHITLEnabled() const { return hitlEnabled; }
+
 private:
     // Base Astra configuration
     AstraConfig astraConfig;
@@ -231,6 +242,9 @@ private:
     int ledStatusPin;
     int sensorStatusLEDPin;
     int gpsStatusLEDPin;
+
+    // HITL configuration
+    bool hitlEnabled;
 };
 
 } // namespace astra_rocket

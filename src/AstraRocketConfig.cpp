@@ -40,7 +40,8 @@ AstraRocketConfig::AstraRocketConfig()
       buzzerFeedback(true),
       ledStatusPin(LED_BUILTIN),
       sensorStatusLEDPin(-1),
-      gpsStatusLEDPin(-1)
+      gpsStatusLEDPin(-1),
+      hitlEnabled(false)
 {
     // Configure base AstraConfig with sensible defaults
     astraConfig.withUpdateRate(50.0);  // 50 Hz default update rate
@@ -148,6 +149,12 @@ AstraRocketConfig& AstraRocketConfig::withSensorStatusLEDPin(int pin) {
 
 AstraRocketConfig& AstraRocketConfig::withGPSStatusLEDPin(int pin) {
     gpsStatusLEDPin = pin;
+    return *this;
+}
+
+// HITL configuration
+AstraRocketConfig& AstraRocketConfig::withHITL(bool enable) {
+    hitlEnabled = enable;
     return *this;
 }
 

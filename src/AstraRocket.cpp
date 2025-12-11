@@ -21,6 +21,8 @@ namespace astra_rocket {
 AstraRocket::AstraRocket()
     : astraSys(nullptr),
       rocketState(nullptr),
+      kalmanFilter(nullptr),
+      orientationFilter(nullptr),
       barometer(nullptr),
       gps(nullptr),
       imu(nullptr),
@@ -37,6 +39,7 @@ AstraRocket::AstraRocket()
       liftoffTime(0),
       previousStage(PAD_IDLE),
       groundLevelAltitude(0),
+      hitlGroundLevelSet(false),
       i2c_device_count(0),
       i2c_scanned(false),
       i2c_claimed_count(0)
@@ -48,6 +51,8 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
     : config(cfg),
       astraSys(nullptr),
       rocketState(nullptr),
+      kalmanFilter(nullptr),
+      orientationFilter(nullptr),
       barometer(nullptr),
       gps(nullptr),
       imu(nullptr),
@@ -64,6 +69,7 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
       liftoffTime(0),
       previousStage(PAD_IDLE),
       groundLevelAltitude(0),
+      hitlGroundLevelSet(false),
       i2c_device_count(0),
       i2c_scanned(false),
       i2c_claimed_count(0)
@@ -73,6 +79,8 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
 AstraRocket::~AstraRocket() {
     if (astraSys) delete astraSys;
     if (rocketState) delete rocketState;
+    if (kalmanFilter) delete kalmanFilter;
+    if (orientationFilter) delete orientationFilter;
     if (sensorArray) delete[] sensorArray;
     if (dataSinks) delete[] dataSinks;
     if (eventSinks) delete[] eventSinks;
@@ -93,14 +101,23 @@ bool AstraRocket::init() {
     // Note: Sensors will be initialized by Astra::init() -> State::begin()
     // No need to initialize them manually here
 
-    // Create rocket state with detected sensors
-    rocketState = new RocketState(sensorArray, numSensors, nullptr);
-    LOGI("RocketState created with %d sensors", numSensors);
+    // Create Kalman filter for state estimation
+    kalmanFilter = new RocketKF();
+    LOGI("RocketKF Kalman filter created");
+
+    // Create orientation filter for AHRS
+    // Using default gains: Kp=0.1, Ki=0.0005
+    orientationFilter = new MahonyAHRS(0.1, 0.0005);
+    LOGI("MahonyAHRS orientation filter created");
+
+    // Create rocket state with detected sensors, Kalman filter, and orientation filter
+    rocketState = new RocketState(sensorArray, numSensors, kalmanFilter, orientationFilter);
+    LOGI("RocketState created with %d sensors, Kalman filter, and orientation filter", numSensors);
 
     // Configure base Astra system
     config.getAstraConfig()->withState(rocketState);
-    config.getAstraConfig()->withUpdateRate(50.0);  // 50 Hz default
-    config.getAstraConfig()->withLoggingRate(1.0);  // 1 Hz for testing/debugging
+    config.getAstraConfig()->withUpdateRate(50.0);  // 50 Hz default (can be overridden by user config)
+    config.getAstraConfig()->withLoggingRate(config.getPreflightLogRate());
     config.getAstraConfig()->withDataLogs(dataSinks, numDataSinks);
 
     // Configure BlinkBuzz for status indicators
@@ -123,15 +140,21 @@ bool AstraRocket::init() {
     LOGI("Astra system initialized successfully. Reading sensors to establish baseline.");
 
     // Establish ground level reference
-    // Wait a moment for barometer to stabilize
-    delay(500);
-    astraSys->update();
-    if (barometer && barometer->isInitialized()) {
-        groundLevelAltitude = barometer->getASLAltM();
-        rocketState->setGroundLevel(groundLevelAltitude);
-        LOGI("Ground level established: %0.2f m MSL", groundLevelAltitude);
+    if (config.getHITLEnabled()) {
+        // In HITL mode, skip initial ground level setup
+        // It will be established on first valid HITL packet
+        LOGI("HITL mode: Ground level will be set from first simulation packet");
     } else {
-        LOGW("Barometer not available - AGL calculations disabled");
+        // Hardware mode: Wait for barometer to stabilize
+        delay(500);
+        astraSys->update();
+        if (barometer && barometer->isInitialized()) {
+            groundLevelAltitude = barometer->getASLAltM();
+            rocketState->setGroundLevel(groundLevelAltitude);
+            LOGI("Ground level established: %0.2f m MSL", groundLevelAltitude);
+        } else {
+            LOGW("Barometer not available - AGL calculations disabled");
+        }
     }
 
     // Initialization complete
@@ -142,9 +165,45 @@ bool AstraRocket::init() {
 }
 
 void AstraRocket::update() {
-    // Update Astra system (sensors, state estimation, logging)
-    // Astra handles telemetry logging automatically at the configured rate
-    astraSys->update();
+    // Check if HITL mode is enabled
+    if (config.getHITLEnabled()) {
+        // HITL mode: wait for incoming sensor data from simulation
+        if (Serial.available()) {
+            String line = Serial.readStringUntil('\n');
+
+            if (line.startsWith("HITL/")) {
+                // Parse incoming HITL packet
+                double simTime;
+                if (HITLParser::parseAndInject(line.c_str(), simTime)) {
+                    // Update with simulation time (NOT millis()!)
+                    // Convert simTime from seconds to milliseconds for Astra
+                    double simTimeMs = simTime * 1000.0;
+                    // This will read sensors from the HITL buffer
+                    astraSys->update(simTimeMs);
+
+                    // Set ground level from first valid packet (after update)
+                    if (!hitlGroundLevelSet && barometer && barometer->isInitialized()) {
+                        // Debug: Check what pressure value we're reading
+                        HITLSensorBuffer& buffer = HITLSensorBuffer::instance();
+                        LOGI("HITL Debug: Buffer pressure = %0.2f hPa", buffer.data.pressure);
+                        LOGI("HITL Debug: Barometer pressure = %0.2f hPa", barometer->getPressure());
+
+                        groundLevelAltitude = barometer->getASLAltM();
+                        rocketState->setGroundLevel(groundLevelAltitude);
+                        hitlGroundLevelSet = true;
+                        LOGI("HITL: Ground level established at %0.2f m MSL from first packet", groundLevelAltitude);
+                    }
+
+                    // DataLogger automatically outputs "TELEM/" data to Serial
+                } else {
+                    LOGE("HITL: Failed to parse packet");
+                }
+            }
+        }
+    } else {
+        // Normal hardware mode: update with real time
+        astraSys->update();
+    }
 
     // Check for flight stage transitions
     FlightStage currentStage = rocketState->getFlightStage();
@@ -169,29 +228,46 @@ FlightStage AstraRocket::getFlightStage() const {
 bool AstraRocket::autoDetectSensors() {
     LOGI("Starting sensor auto-detection...");
 
-    // Get sensors from config or auto-detect
-    barometer = config.getBarometer();
-    if (!barometer) {
-        barometer = detectBarometer();
-    }
+    // Check if HITL mode is enabled
+    if (config.getHITLEnabled()) {
+        LOGI("HITL mode enabled - creating simulated sensors");
 
-    gps = config.getGPS();
-    if (!gps) {
-        gps = detectGPS();
-    }
+        // Create HITL sensors instead of hardware sensors
+        barometer = new HITLBarometer();
+        gps = new HITLGPS();
+        accel = new HITLAccel();
+        gyro = new HITLGyro();
+        mag = new HITLMag();
 
-    // Try to use individual sensors instead of IMU (IMU is broken)
-    imu = config.getIMU();
-    if (!imu) {
-        // Auto-detect individual sensors
-        accel = detectAccel();
-        gyro = detectGyro();
-        mag = detectMag();
-    }
+        // No high-G accelerometer in HITL mode (use normal accel)
+        highGAccel = nullptr;
 
-    highGAccel = config.getHighGAccel();
-    if (!highGAccel) {
-        highGAccel = detectHighGAccel();
+        LOGI("HITL sensors created successfully");
+    } else {
+        // Normal hardware mode - get sensors from config or auto-detect
+        barometer = config.getBarometer();
+        if (!barometer) {
+            barometer = detectBarometer();
+        }
+
+        gps = config.getGPS();
+        if (!gps) {
+            gps = detectGPS();
+        }
+
+        // Try to use individual sensors instead of IMU (IMU is broken)
+        imu = config.getIMU();
+        if (!imu) {
+            // Auto-detect individual sensors
+            accel = detectAccel();
+            gyro = detectGyro();
+            mag = detectMag();
+        }
+
+        highGAccel = config.getHighGAccel();
+        if (!highGAccel) {
+            highGAccel = detectHighGAccel();
+        }
     }
 
     // Build sensor array
@@ -273,12 +349,55 @@ void AstraRocket::handleStageTransition(FlightStage newStage) {
             // Switch to high-rate logging
             config.getAstraConfig()->withLoggingRate(config.getFlightLogRate());
             LOGI("Switched to flight logging rate: %0.1f Hz", config.getFlightLogRate());
+
+            // During boost, high acceleration interferes with accelerometer-based orientation
+            // Switch to gyro-only mode to prevent orientation drift
+            if (orientationFilter) {
+                rocketState->setOrientationFilterMode(MahonyMode::GYRO_ONLY);
+                LOGI("Orientation filter: switched to GYRO_ONLY mode for boost phase");
+            }
+            break;
+
+        case COAST:
+            // After motor burnout, we're in lower G conditions
+            // Re-enable accelerometer correction for better orientation accuracy
+            if (orientationFilter) {
+                rocketState->setOrientationFilterMode(MahonyMode::CORRECTING);
+                LOGI("Orientation filter: switched to CORRECTING mode for coast phase");
+            }
+            break;
+
+        case APOGEE:
+            // Near apogee, acceleration is very low (near 0G)
+            // Keep gyro-only to avoid noise from low-gravity conditions
+            if (orientationFilter) {
+                rocketState->setOrientationFilterMode(MahonyMode::GYRO_ONLY);
+                LOGI("Orientation filter: switched to GYRO_ONLY mode for apogee phase");
+            }
+            break;
+
+        case EXPECTING_DROGUE:
+        case UNDER_DROGUE:
+        case EXPECTING_MAIN:
+        case UNDER_MAIN:
+            // During descent under parachute, acceleration should be relatively stable
+            // Re-enable accelerometer correction
+            if (orientationFilter) {
+                rocketState->setOrientationFilterMode(MahonyMode::CORRECTING);
+                LOGI("Orientation filter: switched to CORRECTING mode for descent phase");
+            }
             break;
 
         case LANDED:
             // Switch to low-rate logging
             config.getAstraConfig()->withLoggingRate(config.getPostflightLogRate());
             LOGI("Switched to postflight logging rate: %0.1f Hz", config.getPostflightLogRate());
+
+            // After landing, re-enable accelerometer correction for final orientation
+            if (orientationFilter) {
+                rocketState->setOrientationFilterMode(MahonyMode::CORRECTING);
+                LOGI("Orientation filter: switched to CORRECTING mode for landed state");
+            }
             break;
 
         default:

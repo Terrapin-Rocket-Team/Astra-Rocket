@@ -10,9 +10,12 @@
 #include <Sensors/Gyro/Gyro.h>
 #include <Sensors/Mag/Mag.h>
 #include <Sensors/IMU/IMU.h>
+#include <Sensors/HITL/HITL.h>
+#include <Testing/HITLParser.h>
 
 #include "AstraRocketConfig.h"
 #include "RocketState.h"
+#include "RocketKF.h"
 #include "FlightStage.h"
 
 using namespace astra;
@@ -116,6 +119,8 @@ private:
     // Core Astra system
     Astra *astraSys;
     RocketState *rocketState;
+    RocketKF *kalmanFilter;
+    MahonyAHRS *orientationFilter;
 
     // Sensors
     Barometer *barometer;
@@ -138,6 +143,9 @@ private:
     unsigned long liftoffTime;
     FlightStage previousStage;
     double groundLevelAltitude;
+
+    // HITL tracking
+    bool hitlGroundLevelSet;
 
     // I2C scan cache
     uint8_t i2c_addresses[20];

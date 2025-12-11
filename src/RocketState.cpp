@@ -1,13 +1,14 @@
 #include "RocketState.h"
 #include <RecordData/Logging/EventLogger.h>
 #include <Math/Vector.h>
+#include <Sensors/Accel/Accel.h>
 
 using namespace astra;
 
 namespace astra_rocket {
 
-RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter)
-    : State(sensors, numSensors, filter),
+RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter, MahonyAHRS *orientationFilter)
+    : State(sensors, numSensors, filter, orientationFilter),
       currentStage(PAD_IDLE),
       previousStage(PAD_IDLE),
       timeInCurrentStage(0),
@@ -79,51 +80,73 @@ void RocketState::calculateVerticalComponents() {
     }
 
     // Calculate vertical velocity
-    // First check if State class is calculating velocity (from filter/GPS)
-    double stateVertVel = -velocity.z();
+    // Use State class velocity from orientation filter if available
+    // The State class now provides earth-frame velocity with orientation filter
+    double stateVertVel = -velocity.z();  // NED frame: negative Z is up
 
     // If State velocity is essentially zero (not being calculated),
-    // calculate from altitude changes
+    // calculate from altitude changes as fallback
     if (fabs(stateVertVel) < 0.01 && currentTime > lastTime) {
         double dt = currentTime - lastTime;
         if (dt > 0.001) {  // Avoid division by very small numbers
             verticalVelocity = (altitudeAGL - previousAltitudeAGL) / dt;
         }
     } else {
-        // Use State class velocity
+        // Use State class velocity (now includes orientation filter data)
         verticalVelocity = stateVertVel;
     }
 
     // Store current altitude for next iteration
     previousAltitudeAGL = altitudeAGL;
 
-    // Get acceleration from IMU directly
-    IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
-    Vector<3> accelNED(0, 0, 0);
-    if (imu && sensorOK(imu)) {
-        accelNED = imu->getAcceleration();
-    }
+    // Get earth-frame acceleration from State (which uses orientation filter)
+    // This is already gravity-compensated and in earth frame
+    Vector<3> earthAccel = acceleration;
 
-    // Calculate vertical acceleration
-    // Total acceleration magnitude in G's
-    double totalAccelMagnitude = accelNED.magnitude() / 9.81;
+    // Vertical component (Z-axis in earth frame, negative for up in NED)
+    verticalAccel = -earthAccel.z() / 9.81;  // Convert to G's
 
-    // Vertical component (z-axis in NED, negate for up-positive)
-    verticalAccel = -accelNED.z() / 9.81;
+    // Calculate off-vertical angle using orientation quaternion
+    // This is more accurate than using acceleration alone
+    MahonyAHRS *ahrs = getOrientationFilter();
+    if (ahrs && ahrs->isInitialized()) {
+        // Get the current orientation quaternion
+        Quaternion q = orientation;
 
-    // Calculate off-vertical angle
-    // Angle between rocket's longitudinal axis and vertical
-    // Using acceleration direction as a proxy for rocket orientation
-    Vector<3> verticalRef(0, 0, -1);  // Up in NED frame (negative Z)
+        // Rocket body Z-axis in body frame (pointing along rocket)
+        Vector<3> bodyZ(0, 0, 1);
 
-    // For now, use a simple approximation based on acceleration direction
-    if (totalAccelMagnitude > 0.1) {
-        Vector<3> accelDir = accelNED;
-        accelDir.normalize();
-        double cosAngle = accelDir.dot(verticalRef);
+        // Rotate body Z into earth frame to see which way rocket is pointing
+        Vector<3> rocketDir = q.rotateVector(bodyZ);
+
+        // Earth vertical reference (up in NED is negative Z)
+        Vector<3> verticalRef(0, 0, -1);
+
+        // Calculate angle between rocket direction and vertical
+        double cosAngle = rocketDir.dot(verticalRef);
         offVerticalAngle = acos(fmax(-1.0, fmin(1.0, cosAngle))) * 180.0 / M_PI;
     } else {
-        offVerticalAngle = 0;
+        // Fallback: use acceleration direction (less accurate during high-G)
+        IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
+        Accel *accel_sensor = static_cast<Accel*>(getSensor("Accelerometer"_i));
+        Vector<3> accelBody(0, 0, 0);
+
+        if (imu && sensorOK(imu)) {
+            accelBody = imu->getAcceleration();
+        } else if (accel_sensor && sensorOK(accel_sensor)) {
+            accelBody = accel_sensor->getAccel();
+        }
+
+        double totalAccelMagnitude = accelBody.magnitude();
+        if (totalAccelMagnitude > 1.0) {  // Only if acceleration is significant
+            Vector<3> accelDir = accelBody;
+            accelDir.normalize();
+            Vector<3> verticalRef(0, 0, -1);  // Up in NED frame
+            double cosAngle = accelDir.dot(verticalRef);
+            offVerticalAngle = acos(fmax(-1.0, fmin(1.0, cosAngle))) * 180.0 / M_PI;
+        } else {
+            offVerticalAngle = 0;
+        }
     }
 }
 
