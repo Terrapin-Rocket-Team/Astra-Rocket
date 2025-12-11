@@ -100,11 +100,11 @@ void RocketState::calculateVerticalComponents() {
     previousAltitudeAGL = altitudeAGL;
 
     // Get earth-frame acceleration from State (which uses orientation filter)
-    // This is already gravity-compensated and in earth frame
+    // This is already gravity-compensated and in earth frame (ENU: X=East, Y=North, Z=Up)
     Vector<3> earthAccel = acceleration;
 
-    // Vertical component (Z-axis in earth frame, negative for up in NED)
-    verticalAccel = -earthAccel.z() / 9.81;  // Convert to G's
+    // Vertical component (Z-axis in earth frame, positive for up in ENU)
+    verticalAccel = earthAccel.z() / 9.81;  // Convert to G's
 
     // Calculate off-vertical angle using orientation quaternion
     // This is more accurate than using acceleration alone

@@ -3,8 +3,17 @@
 Desktop HITL Simulation for Astra-Rocket
 
 This script simulates a simple rocket flight and sends sensor data to the
-flight computer over USB Serial. It receives telemetry back and can be used
-to iterate on flight software without deploying to hardware.
+flight computer over USB Serial at a controlled rate. The FC processes the data
+and sends back TELEM/ packets at its configured logging rate.
+
+Protocol:
+    1. Sim sends HITL/ packet at simulation rate (50Hz)
+    2. FC processes and updates state
+    3. FC sends TELEM/ at logging rate (configured in FC, typically 10-50Hz)
+    4. Sim reads and logs all TELEM/ responses asynchronously
+
+The sim paces itself to avoid overwhelming the FC's serial buffer while maintaining
+accurate simulation timing.
 
 Requirements:
     pip install pyserial numpy matplotlib
@@ -36,10 +45,13 @@ class SimState:
 class RocketSimulation:
     """Simple 3DOF rocket flight simulation"""
 
-    def __init__(self, dt=0.02):
+    def __init__(self, dt=0.02, ignition_delay=3.0):
         self.dt = dt  # Timestep (50 Hz)
         self.state = SimState()
         self.g = 9.81  # Gravity (m/s^2)
+
+        # Ignition delay - time to wait before motor ignites
+        self.ignition_delay = ignition_delay
 
         # Rocket parameters (typical high-power rocket)
         self.mass = 5.0  # kg (11 lbs)
@@ -49,8 +61,10 @@ class RocketSimulation:
 
     def compute_forces(self, state: SimState) -> Tuple[np.ndarray, np.ndarray]:
         """Compute forces and torques on rocket"""
-        # Thrust (only during motor burn)
-        if state.time < self.motor_burnout:
+        # Thrust (only after ignition delay and during motor burn)
+        time_since_ignition = state.time - self.ignition_delay
+
+        if 0 <= time_since_ignition < self.motor_burnout:
             thrust = np.array([0, 0, self.motor_thrust])
         else:
             thrust = np.array([0, 0, 0])
@@ -83,10 +97,12 @@ class RocketSimulation:
         self.state.velocity += acceleration * self.dt
         self.state.position += self.state.velocity * self.dt
 
-        # Ground contact
+        # Ground contact (prevents falling through floor during ignition delay)
         if self.state.position[2] < 0:
             self.state.position[2] = 0
-            self.state.velocity[2] = 0
+            # Only zero out velocity if falling down
+            if self.state.velocity[2] < 0:
+                self.state.velocity[2] = 0
 
         # Update time
         self.state.time += self.dt
@@ -95,9 +111,16 @@ class RocketSimulation:
 
     def get_sensor_data(self, state: SimState) -> dict:
         """Convert state to sensor readings"""
-        # Acceleration in body frame (including gravity)
+        # Accelerometers measure specific force (all forces EXCEPT gravity)
+        # On the pad, they read +1g upward. In free fall, they read 0.
         force, _ = self.compute_forces(state)
-        accel_body = force / self.mass + np.array([0, 0, self.g])
+        # Remove gravity from total force to get specific force
+        specific_force = force - np.array([0, 0, -self.mass * self.g])
+        accel_body = specific_force / self.mass
+
+        # IMPORTANT: Mahony filter expects ENU frame (X=East, Y=North, Z=Up)
+        # Our simulation is already in ENU, so no transformation needed
+        # Just use accel_body directly
 
         # Pressure from altitude (barometric formula)
         # Calculate in Pa, then convert to hPa for the flight computer
@@ -112,7 +135,7 @@ class RocketSimulation:
 
         return {
             'timestamp': state.time,
-            'accel': accel_body,
+            'accel': accel_body,  # ENU frame (X=East, Y=North, Z=Up)
             'gyro': state.ang_velocity,
             'mag': np.array([20.0, 10.0, -45.0]),  # Constant magnetic field
             'pressure': pressure,
@@ -216,9 +239,11 @@ def main():
     print("\nStarting simulation...")
     print("-" * 60)
 
-    # Create simulation
-    sim = RocketSimulation(dt=0.02)  # 50 Hz
-    max_time = 20.0  # 20 second flight
+    # Simulation parameters
+    dt = 0.02  # 50 Hz
+    warmup_time = 1.0  # Hold at ground level for 1 second to let KF settle
+    ignition_delay = 3.0  # Time on pad before motor ignites (additional settling time)
+    max_time = 20.0  # 20 second flight (after warmup)
 
     # Track max altitude
     max_altitude = 0.0
@@ -232,7 +257,8 @@ def main():
     sim_alt_data: List[float] = []
     fc_alt_data: List[float] = []
 
-    # Track last stage for detecting changes
+    # Track stage transitions for plotting
+    stage_transitions: List[Tuple[float, str]] = []  # List of (time, stage_name)
     last_stage = None
 
     # Open CSV file for logging telemetry
@@ -240,15 +266,117 @@ def main():
     csv_file = open(csv_filename, 'w', newline='', encoding='utf-8')
     csv_writer = None  # Will be initialized when we get the header
 
+    # Write CSV header now if we already have it from startup
+    if header_columns is not None:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_columns)
+        print(f"CSV file initialized with {len(header_columns) + 3} columns")
+
+    # Warmup phase - send stationary data at steady rate while monitoring FC
+    print("Warmup phase: Sending stationary data while FC initializes...")
+    g = 9.81  # Gravity constant
+    warmup_start = time.time()
+    warmup_packet_count = 0
+    fc_ready = False
+    min_warmup_packets = int(warmup_time / dt)  # Minimum packets after FC ready
+    packets_since_ready = 0
+
+    while not fc_ready or packets_since_ready < min_warmup_packets:
+        loop_start = time.time()
+
+        # Send stationary sensor data
+        sensor_data = {
+            'timestamp': warmup_packet_count * dt,
+            'accel': np.array([0.0, 0.0, g]),  # Just gravity
+            'gyro': np.array([0.0, 0.0, 0.0]),
+            'mag': np.array([20.0, 10.0, -45.0]),
+            'pressure': 1013.25,  # Sea level pressure
+            'temperature': 25.0,
+            'gps_lat': 45.0,
+            'gps_lon': -122.0,
+            'gps_alt': 0.0,
+            'gps_fix': 1,
+            'gps_fix_quality': 8,
+            'gps_heading': 0.0
+        }
+
+        packet = format_hitl_packet(sensor_data)
+        ser.write(packet.encode())
+        warmup_packet_count += 1
+
+        # Read any available telemetry (non-blocking)
+        while ser.in_waiting:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+
+            # Check if FC reports it's ready
+            if "Flight computer ready" in line or "Ready for simulation" in line:
+                if not fc_ready:
+                    print(f"  FC ready after {warmup_packet_count} packets! Settling KF for {warmup_time}s...")
+                    fc_ready = True
+                    packets_since_ready = 0
+
+            # Look for telemetry
+            if line.startswith("TELEM/"):
+                if 'State - Time (s)' in line or 'State - Flight Stage' in line:
+                    # Parse header if we haven't yet
+                    if column_map is None:
+                        column_map = parse_telem_header(line)
+                        header_columns = line[6:].strip().split(',')
+                        print(f"  Parsed telemetry header with {len(column_map)} columns")
+                        # Initialize CSV with header
+                        csv_writer = csv.writer(csv_file)
+                        csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_columns)
+                else:
+                    # Got telemetry data
+                    telem = parse_telem_line(line, column_map)
+
+                    # Log telemetry to CSV during warmup
+                    if csv_writer is not None:
+                        sim_values = [
+                            round((warmup_packet_count - 1) * dt, 2),  # Previous packet time
+                            0.00,  # SimAlt = 0 during warmup
+                            0.00   # SimVel = 0 during warmup
+                        ]
+                        csv_writer.writerow(sim_values + telem['values'])
+
+                    # Mark FC as ready on first data telemetry
+                    if not fc_ready:
+                        print(f"  FC sending telemetry after {warmup_packet_count} packets! Settling KF for {warmup_time}s...")
+                        fc_ready = True
+                        packets_since_ready = 0
+            else:
+                # Non-telemetry messages
+                if line:  # Only print non-empty lines
+                    print(f"[FC] {line}")
+
+        if fc_ready:
+            packets_since_ready += 1
+
+        # Maintain steady timing (50Hz = 20ms per loop)
+        elapsed = time.time() - loop_start
+        if elapsed < dt:
+            time.sleep(dt - elapsed)
+
+    warmup_duration = time.time() - warmup_start
+    print(f"Warmup complete! Sent {warmup_packet_count} packets over {warmup_duration:.1f}s")
+
+    # Reset simulation to start from zero after warmup
+    sim = RocketSimulation(dt=dt, ignition_delay=ignition_delay)
+    print(f"Simulation reset: time={sim.state.time}, altitude={sim.state.position[2]}, velocity={sim.state.velocity[2]}")
+    print(f"Motor will ignite at t={ignition_delay:.1f}s")
+    print(f"Starting flight simulation...\n")
+
     try:
+        print("Starting main simulation loop...")
+
         while sim.state.time < max_time:
+            loop_start = time.time()
+
             # Step simulation
             state = sim.step()
-
-            # Get sensor data
             sensor_data = sim.get_sensor_data(state)
 
-            # Format and send HITL packet
+            # Send HITL packet
             packet = format_hitl_packet(sensor_data)
             ser.write(packet.encode())
             packet_count += 1
@@ -261,38 +389,35 @@ def main():
                 print(f"    Pressure: {sensor_data['pressure']:.2f} hPa")
                 print(f"    Altitude: {state.position[2]:.2f} m")
                 print(f"    Velocity: {state.velocity[2]:.2f} m/s")
-                print(f"    Raw packet: {packet.strip()}")
 
-            # Read telemetry response (with timeout)
-            start_time = time.time()
-            telem_received = False
-            while time.time() - start_time < 0.1:  # 100ms timeout
-                if ser.in_waiting:
-                    line = ser.readline().decode('utf-8', errors='ignore').strip()
-                    if line.startswith("TELEM/"):
-                        # Check if this is the header line
-                        if 'State - Time (s)' in line or 'State - Flight Stage' in line:
-                            # Parse header to get column mapping
-                            column_map = parse_telem_header(line)
-                            print(f"\n[HEADER] Parsed telemetry header with {len(column_map)} columns")
-                            if verbose:
-                                print(f"  Column map: {column_map}")
+            # Read all available telemetry (non-blocking)
+            while ser.in_waiting:
+                line = ser.readline().decode('utf-8', errors='ignore').strip()
 
-                            # Initialize CSV writer with header
-                            if csv_writer is None:
-                                # Add simulation columns to the header
-                                header_line = line[6:].strip()  # Remove "TELEM/" prefix
-                                csv_writer = csv.writer(csv_file)
-                                csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_line.split(','))
-                            break
-
-                        # Parse data line
+                if line.startswith("TELEM/"):
+                    # Check if this is the header line
+                    if 'State - Time (s)' in line or 'State - Flight Stage' in line:
+                        column_map = parse_telem_header(line)
+                        print(f"\n[HEADER] Parsed telemetry header with {len(column_map)} columns")
+                        if verbose:
+                            print(f"  Column map: {column_map}")
+                        # Initialize CSV writer with header if needed
+                        if csv_writer is None:
+                            header_line = line[6:].strip()
+                            csv_writer = csv.writer(csv_file)
+                            csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_line.split(','))
+                    else:
+                        # Got telemetry data
                         telem = parse_telem_line(line, column_map)
-                        telem_received = True
 
                         # Write to CSV
                         if csv_writer is not None:
-                            csv_writer.writerow([sim.state.time, state.position[2], state.velocity[2]] + telem['values'])
+                            sim_values = [
+                                round(sim.state.time, 2),
+                                round(state.position[2], 2),
+                                round(state.velocity[2], 2)
+                            ]
+                            csv_writer.writerow(sim_values + telem['values'])
 
                         # Extract fields using column mapping if available
                         if column_map and 'fields' in telem:
@@ -327,10 +452,20 @@ def main():
                             except (ValueError, IndexError):
                                 stage_name = fc_stage
 
-                            # Print status every 50 packets (~1 second at 50Hz) or on stage change
+                            # Detect and record stage changes
                             stage_changed = (last_stage != fc_stage)
+                            if stage_changed and last_stage is not None:
+                                # Record transition for plotting
+                                stage_transitions.append((sim.state.time, stage_name))
+
+                            # Print status every 50 packets (~1 second at 50Hz) or on stage change
                             if (packet_count % 50 == 0) or stage_changed:
-                                print(f"[{sim.state.time:6.2f}s] SimAlt: {state.position[2]:7.2f}m  "
+                                # Show pre-launch status differently
+                                if sim.state.time < sim.ignition_delay:
+                                    status = f"[PAD HOLD - T-{sim.ignition_delay - sim.state.time:.1f}s]"
+                                else:
+                                    status = f"[{sim.state.time:6.2f}s]"
+                                print(f"{status} SimAlt: {state.position[2]:7.2f}m  "
                                       f"KF_PZ: {fc_pz:>7}m  "
                                       f"Vel: {state.velocity[2]:7.2f}m/s  "
                                       f"Stage: {stage_name}")
@@ -339,13 +474,10 @@ def main():
                             # Fallback if no column map available yet
                             if verbose or packet_count <= 3:
                                 print(f"<<< RECEIVED TELEM (no column map yet): {len(telem['values'])} values")
-                        break
-                    else:
-                        # Non-telemetry messages (events, logs)
+                else:
+                    # Non-telemetry messages (events, logs)
+                    if line:  # Only print non-empty lines
                         print(f"[FC] {line}")
-
-            if not telem_received and (verbose or packet_count <= 3):
-                print(f"    WARNING: No telemetry response received!")
 
             # Track max altitude
             if state.position[2] > max_altitude:
@@ -355,6 +487,11 @@ def main():
             if state.position[2] <= 0 and state.time > 10.0:
                 print("\nRocket has landed. Ending simulation.")
                 break
+
+            # Maintain steady timing (50Hz = 20ms per loop)
+            elapsed = time.time() - loop_start
+            if elapsed < dt:
+                time.sleep(dt - elapsed)
 
     except KeyboardInterrupt:
         print("\n\nSimulation interrupted by user.")
@@ -379,16 +516,38 @@ def main():
         plt.plot(time_data, sim_alt_data, 'b-', label='Simulation Truth', linewidth=2)
         plt.plot(time_data, fc_alt_data, 'r--', label='Kalman Filter (State PZ)', linewidth=2)
 
+        # Add vertical lines for stage transitions
+        stage_colors = {
+            'PAD': 'gray',
+            'BOOST': 'green',
+            'COAST': 'orange',
+            'APOGEE': 'red',
+            'EXP_DROGUE': 'purple',
+            'DROGUE': 'purple',
+            'EXP_MAIN': 'blue',
+            'MAIN': 'blue',
+            'LANDED': 'black'
+        }
+
+        for trans_time, stage_name in stage_transitions:
+            color = stage_colors.get(stage_name, 'gray')
+            plt.axvline(x=trans_time, color=color, linestyle='--', alpha=0.6, linewidth=1.5)
+            # Add text label for the stage
+            plt.text(trans_time, plt.ylim()[1] * 0.95, stage_name,
+                    rotation=90, verticalalignment='top', fontsize=9,
+                    color=color, fontweight='bold')
+
         plt.xlabel('Time (s)', fontsize=12)
         plt.ylabel('Altitude (m)', fontsize=12)
         plt.title('Altitude Comparison: Simulation vs Kalman Filter', fontsize=14, fontweight='bold')
-        plt.legend(fontsize=11)
+        plt.legend(fontsize=11, loc='upper left')
         plt.grid(True, alpha=0.3)
 
         # Add max altitude annotations
         max_sim_alt = max(sim_alt_data) if sim_alt_data else 0
         max_fc_alt = max(fc_alt_data) if fc_alt_data else 0
-        plt.text(0.02, 0.98, f'Max Sim Alt: {max_sim_alt:.2f} m\nMax FC Alt: {max_fc_alt:.2f} m',
+        stage_count = len(stage_transitions)
+        plt.text(0.02, 0.85, f'Max Sim Alt: {max_sim_alt:.2f} m\nMax FC Alt: {max_fc_alt:.2f} m\nStage Transitions: {stage_count}',
                  transform=plt.gca().transAxes, fontsize=10,
                  verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
