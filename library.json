@@ -53,6 +53,17 @@
                     "-<AstraRocket.cpp>",
                     "-<AstraRocketConfig.cpp>"
                 ]
+            },
+            "teensy": {
+                "flags": [
+                    "-std=c++17",
+                    "-DENV_TEENSY=1"
+                ],
+                "srcFilter": [
+                    "+<*>",
+                    "-<AstraRocket.cpp>",
+                    "-<AstraRocketConfig.cpp>"
+                ]
             }
         }
     }
