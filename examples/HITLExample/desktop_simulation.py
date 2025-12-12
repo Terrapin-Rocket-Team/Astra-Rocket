@@ -2,9 +2,13 @@
 """
 Desktop HITL Simulation for Astra-Rocket
 
-This script simulates a simple rocket flight and sends sensor data to the
+This script simulates a rocket flight and sends sensor data to the
 flight computer over USB Serial at a controlled rate. The FC processes the data
 and sends back TELEM/ packets at its configured logging rate.
+
+Supports two modes:
+    1. CSV mode: Load data from an OpenRocket CSV export file
+    2. Physics mode: Generate data from simple physics simulation
 
 Protocol:
     1. Sim sends HITL/ packet at simulation rate (50Hz)
@@ -19,8 +23,10 @@ Requirements:
     pip install pyserial numpy matplotlib
 
 Usage:
-    python desktop_simulation.py /dev/ttyACM0  # Linux/Mac
-    python desktop_simulation.py COM3          # Windows
+    python desktop_simulation.py /dev/ttyACM0 [csv_file]  # Linux/Mac
+    python desktop_simulation.py COM3 [csv_file]          # Windows
+
+    If csv_file is provided, uses CSV data. Otherwise uses physics simulation.
 """
 
 import serial
@@ -32,6 +38,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from dataclasses import dataclass, field
 from typing import Tuple, List, Optional, Dict
+import math
 
 @dataclass
 class SimState:
@@ -41,6 +48,305 @@ class SimState:
     velocity: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.0]))  # [vx, vy, vz] in m/s
     orientation: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.0]))  # [roll, pitch, yaw] in radians
     ang_velocity: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 0.0]))  # [wx, wy, wz] in rad/s
+
+
+class CSVSimulation:
+    """Rocket simulation from OpenRocket CSV export"""
+
+    def __init__(self, csv_file: str, dt=0.02, ignition_delay=2.0):
+        """
+        Load OpenRocket CSV file and prepare for playback
+
+        Args:
+            csv_file: Path to OpenRocket CSV export
+            dt: Desired timestep for playback (will interpolate data)
+            ignition_delay: Time to hold at first data point before starting playback
+        """
+        self.dt = dt
+        self.g = 9.81  # Gravity (m/s^2)
+        self.state = SimState()
+        self.ignition_delay = ignition_delay
+
+        # Load CSV data
+        self.data = self._load_csv(csv_file)
+        self.current_index = 0
+        self.max_index = len(self.data['time']) - 1
+
+        print(f"Loaded CSV with {len(self.data['time'])} data points")
+        print(f"Flight duration: {self.data['time'][-1]:.2f} seconds")
+        print(f"Max altitude: {max(self.data['altitude']):.2f} m")
+        print(f"First row - Time: {self.data['time'][0]:.3f}s, Alt: {self.data['altitude'][0]:.2f}m, Accel: {self.data['acceleration'][0]:.2f} m/s²")
+        print(f"Calculated accel for first packet: {self.data['acceleration'][0] + self.g:.2f} m/s² (should be ~9.81 on pad)")
+
+    def _load_csv(self, csv_file: str) -> Dict[str, List[float]]:
+        """Load and parse OpenRocket CSV file"""
+        data = {
+            'time': [],
+            'altitude': [],
+            'velocity': [],
+            'acceleration': [],
+            'pressure': [],
+            'temperature': [],
+            'lat': [],
+            'lon': [],
+            'roll_rate': [],
+            'pitch_rate': [],
+            'yaw_rate': [],
+            'pos_east': [],
+            'pos_north': []
+        }
+
+        with open(csv_file, 'r') as f:
+            reader = csv.reader(f)
+            header = next(reader)
+
+            # Find column indices (case-insensitive, flexible matching)
+            header_lower = [h.strip().lower() for h in header]
+
+            # Helper function to find column index
+            def find_col(*keywords):
+                for kw in keywords:
+                    for i, h in enumerate(header_lower):
+                        if kw in h:
+                            return i
+                return None
+
+            col_time = find_col('time (s)', 'time(s)')
+            col_alt = find_col('altitude (ft)', 'altitude(ft)', 'altitude above sea level')
+            col_vel = find_col('vertical velocity (m/s)', 'vertical velocity(m/s)')
+
+            # Be very specific about vertical acceleration to avoid matching "Total acceleration"
+            col_accel = None
+            col_accel_name = None
+            for i, h in enumerate(header_lower):
+                if 'vertical acceleration' in h and 'total' not in h:
+                    col_accel = i
+                    col_accel_name = header[i]  # Store original header name for debugging
+                    break
+
+            # Debug output to show which column was matched
+            if col_accel is not None:
+                print(f"DEBUG: Matched acceleration column: '{col_accel_name}' (index {col_accel})")
+            else:
+                print(f"WARNING: No acceleration column found!")
+
+            col_pressure = find_col('air pressure (mbar)', 'air pressure(mbar)', 'pressure')
+            col_temp = find_col('air temperature (°f)', 'air temperature(°f)', 'temperature')
+            col_lat = find_col('latitude (° n)', 'latitude(° n)', 'latitude')
+            col_lon = find_col('longitude (° e)', 'longitude(° e)', 'longitude')
+            col_roll = find_col('roll rate (r/s)', 'roll rate(r/s)')
+            col_pitch = find_col('pitch rate (r/s)', 'pitch rate(r/s)')
+            col_yaw = find_col('yaw rate (r/s)', 'yaw rate(r/s)')
+            col_east = find_col('position east of launch (ft)', 'position east')
+            col_north = find_col('position north of launch (ft)', 'position north')
+
+            # Read data rows
+            for row in reader:
+                try:
+                    # Time (required)
+                    if col_time is not None:
+                        data['time'].append(float(row[col_time]))
+
+                    # Altitude in feet -> convert to meters
+                    if col_alt is not None:
+                        alt_ft = float(row[col_alt])
+                        data['altitude'].append(alt_ft * 0.3048)
+                    else:
+                        data['altitude'].append(0.0)
+
+                    # Vertical velocity (already in m/s)
+                    if col_vel is not None:
+                        data['velocity'].append(float(row[col_vel]))
+                    else:
+                        data['velocity'].append(0.0)
+
+                    # Vertical acceleration (already in m/s²)
+                    if col_accel is not None:
+                        data['acceleration'].append(float(row[col_accel]))
+                    else:
+                        data['acceleration'].append(0.0)
+
+                    # Pressure (mbar = hPa, no conversion needed)
+                    if col_pressure is not None:
+                        data['pressure'].append(float(row[col_pressure]))
+                    else:
+                        data['pressure'].append(1013.25)
+
+                    # Temperature °F -> °C
+                    if col_temp is not None:
+                        temp_f = float(row[col_temp])
+                        data['temperature'].append((temp_f - 32) * 5/9)
+                    else:
+                        data['temperature'].append(25.0)
+
+                    # GPS coordinates
+                    if col_lat is not None:
+                        data['lat'].append(float(row[col_lat]))
+                    else:
+                        data['lat'].append(45.0)
+
+                    if col_lon is not None:
+                        data['lon'].append(float(row[col_lon]))
+                    else:
+                        data['lon'].append(-122.0)
+
+                    # Angular rates (r/s -> rad/s), replace NaN with 0
+                    if col_roll is not None:
+                        try:
+                            roll_val = float(row[col_roll])
+                            data['roll_rate'].append(0.0 if math.isnan(roll_val) else roll_val * 2 * math.pi)
+                        except ValueError:
+                            data['roll_rate'].append(0.0)
+                    else:
+                        data['roll_rate'].append(0.0)
+
+                    if col_pitch is not None:
+                        try:
+                            pitch_val = float(row[col_pitch])
+                            data['pitch_rate'].append(0.0 if math.isnan(pitch_val) else pitch_val * 2 * math.pi)
+                        except ValueError:
+                            data['pitch_rate'].append(0.0)
+                    else:
+                        data['pitch_rate'].append(0.0)
+
+                    if col_yaw is not None:
+                        try:
+                            yaw_val = float(row[col_yaw])
+                            data['yaw_rate'].append(0.0 if math.isnan(yaw_val) else yaw_val * 2 * math.pi)
+                        except ValueError:
+                            data['yaw_rate'].append(0.0)
+                    else:
+                        data['yaw_rate'].append(0.0)
+
+                    # Position offsets (feet -> meters)
+                    if col_east is not None:
+                        data['pos_east'].append(float(row[col_east]) * 0.3048)
+                    else:
+                        data['pos_east'].append(0.0)
+
+                    if col_north is not None:
+                        data['pos_north'].append(float(row[col_north]) * 0.3048)
+                    else:
+                        data['pos_north'].append(0.0)
+
+                except (ValueError, IndexError):
+                    # Skip malformed rows
+                    continue
+
+        # OpenRocket CSVs often start at T>0 (e.g., T=0.01s) with motor already firing
+        # Add a synthetic T=0.0s row at pad conditions if needed
+        if len(data['time']) > 0 and data['time'][0] > 0.0:
+            print(f"INFO: CSV starts at T={data['time'][0]:.3f}s, adding synthetic T=0.000s pad row")
+            # Insert pad conditions at T=0.0
+            data['time'].insert(0, 0.0)
+            data['altitude'].insert(0, 0.0)
+            data['velocity'].insert(0, 0.0)
+            data['acceleration'].insert(0, 0.0)  # On pad, kinematic accel = 0
+            data['pressure'].insert(0, data['pressure'][0] if len(data['pressure']) > 0 else 1013.25)
+            data['temperature'].insert(0, data['temperature'][0] if len(data['temperature']) > 0 else 25.0)
+            data['lat'].insert(0, data['lat'][0] if len(data['lat']) > 0 else 45.0)
+            data['lon'].insert(0, data['lon'][0] if len(data['lon']) > 0 else -122.0)
+            data['roll_rate'].insert(0, 0.0)
+            data['pitch_rate'].insert(0, 0.0)
+            data['yaw_rate'].insert(0, 0.0)
+            data['pos_east'].insert(0, 0.0)
+            data['pos_north'].insert(0, 0.0)
+
+        return data
+
+    def step(self) -> SimState:
+        """Get next timestep of data (interpolates between CSV rows if needed)"""
+        # Update simulation time
+        self.state.time += self.dt
+
+        # If still in ignition delay, hold at first data point
+        if self.state.time < self.ignition_delay:
+            idx = 0
+            self.state.position[0] = self.data['pos_east'][idx]
+            self.state.position[1] = self.data['pos_north'][idx]
+            self.state.position[2] = self.data['altitude'][idx]
+            self.state.velocity[0] = 0.0
+            self.state.velocity[1] = 0.0
+            self.state.velocity[2] = 0.0
+            self.state.ang_velocity[0] = 0.0
+            self.state.ang_velocity[1] = 0.0
+            self.state.ang_velocity[2] = 0.0
+            return self.state
+
+        # After ignition delay, use CSV data
+        # Adjust target time to account for ignition delay
+        csv_time = self.state.time - self.ignition_delay
+
+        # Find the two data points to interpolate between
+        while self.current_index < self.max_index and self.data['time'][self.current_index + 1] < csv_time:
+            self.current_index += 1
+
+        # Clamp to valid range
+        if self.current_index >= self.max_index:
+            self.current_index = self.max_index
+            idx = self.current_index
+            alpha = 0.0
+        else:
+            idx = self.current_index
+            t0 = self.data['time'][idx]
+            t1 = self.data['time'][idx + 1]
+            alpha = (csv_time - t0) / (t1 - t0) if t1 > t0 else 0.0
+
+        # Linear interpolation helper
+        def lerp(key):
+            if alpha == 0.0 or idx >= self.max_index:
+                return self.data[key][idx]
+            return self.data[key][idx] * (1 - alpha) + self.data[key][idx + 1] * alpha
+
+        # Position
+        self.state.position[0] = lerp('pos_east')
+        self.state.position[1] = lerp('pos_north')
+        self.state.position[2] = lerp('altitude')
+
+        # Velocity (only have vertical)
+        self.state.velocity[0] = 0.0
+        self.state.velocity[1] = 0.0
+        self.state.velocity[2] = lerp('velocity')
+
+        # Angular velocity
+        self.state.ang_velocity[0] = lerp('roll_rate')
+        self.state.ang_velocity[1] = lerp('pitch_rate')
+        self.state.ang_velocity[2] = lerp('yaw_rate')
+
+        return self.state
+
+    def get_sensor_data(self, state: SimState) -> dict:
+        """Convert state to sensor readings"""
+        # During ignition delay, use first data point
+        if state.time < self.ignition_delay:
+            idx = 0
+        else:
+            idx = min(self.current_index, self.max_index)
+
+        # Accelerometer reads specific force (not including gravity)
+        # OpenRocket's acceleration does NOT include gravity (it's kinematic acceleration)
+        # So when sitting on pad: OR shows 0 m/s², but accelerometer should read +g (support force)
+        # Specific force = kinematic accel + gravity
+        accel_z = self.data['acceleration'][idx] + self.g
+
+        # For X and Y, we don't have data from OpenRocket, so use 0
+        # In ENU frame: X=East, Y=North, Z=Up
+        accel_body = np.array([0.0, 0.0, accel_z])
+
+        return {
+            'timestamp': state.time,
+            'accel': accel_body,  # ENU frame (X=East, Y=North, Z=Up)
+            'gyro': state.ang_velocity,  # [roll, pitch, yaw] rates in rad/s
+            'mag': np.array([20.0, 10.0, -45.0]),  # Constant magnetic field
+            'pressure': self.data['pressure'][idx],
+            'temperature': self.data['temperature'][idx],
+            'gps_lat': self.data['lat'][idx],
+            'gps_lon': self.data['lon'][idx],
+            'gps_alt': state.position[2],
+            'gps_fix': 1 if state.time > 1.0 else 0,  # GPS fix after 1 second
+            'gps_fix_quality': 8 if state.time > 1.0 else 0,
+            'gps_heading': 0.0
+        }
 
 class RocketSimulation:
     """Simple 3DOF rocket flight simulation"""
@@ -200,16 +506,24 @@ def parse_telem_header(header_line: str) -> dict:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python desktop_simulation.py <serial_port>")
+        print("Usage: python desktop_simulation.py <serial_port> [csv_file]")
         print("Example: python desktop_simulation.py /dev/ttyACM0")
+        print("         python desktop_simulation.py COM3 FMMORK.csv")
         sys.exit(1)
 
     port = sys.argv[1]
+    csv_file = sys.argv[2] if len(sys.argv) > 2 else None
     baud = 115200
 
     print("===========================================")
     print("  Astra-Rocket HITL Desktop Simulation")
     print("===========================================")
+
+    if csv_file:
+        print(f"Mode: CSV playback from '{csv_file}'")
+    else:
+        print(f"Mode: Physics simulation")
+
     print(f"Connecting to {port} at {baud} baud...")
 
     try:
@@ -242,8 +556,23 @@ def main():
     # Simulation parameters
     dt = 0.02  # 50 Hz
     warmup_time = 1.0  # Hold at ground level for 1 second to let KF settle
-    ignition_delay = 3.0  # Time on pad before motor ignites (additional settling time)
-    max_time = 20.0  # 20 second flight (after warmup)
+
+    # Determine max flight time and create simulation object
+    ignition_delay = 2.0  # Time on pad before motor ignites
+
+    if csv_file:
+        # CSV mode - load the file to get flight duration
+        try:
+            temp_sim = CSVSimulation(csv_file, dt, ignition_delay)
+            max_time = temp_sim.data['time'][-1] + ignition_delay  # Add ignition delay to total time
+            del temp_sim  # We'll create a fresh one after warmup
+            print(f"CSV flight duration: {max_time:.2f} seconds (includes {ignition_delay:.1f}s ignition delay)")
+        except Exception as e:
+            print(f"ERROR: Could not load CSV file: {e}")
+            sys.exit(1)
+    else:
+        # Physics mode
+        max_time = 20.0  # 20 second flight (after warmup)
 
     # Track max altitude
     max_altitude = 0.0
@@ -262,15 +591,15 @@ def main():
     last_stage = None
 
     # Open CSV file for logging telemetry
-    csv_filename = 'hitl_telemetry_log.csv'
-    csv_file = open(csv_filename, 'w', newline='', encoding='utf-8')
+    csv_log_filename = 'hitl_telemetry_log.csv'
+    csv_log_file = open(csv_log_filename, 'w', newline='', encoding='utf-8')
     csv_writer = None  # Will be initialized when we get the header
 
     # Write CSV header now if we already have it from startup
     if header_columns is not None:
-        csv_writer = csv.writer(csv_file)
+        csv_writer = csv.writer(csv_log_file)
         csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_columns)
-        print(f"CSV file initialized with {len(header_columns) + 3} columns")
+        print(f"CSV log file initialized with {len(header_columns) + 3} columns")
 
     # Warmup phase - send stationary data at steady rate while monitoring FC
     print("Warmup phase: Sending stationary data while FC initializes...")
@@ -324,7 +653,7 @@ def main():
                         header_columns = line[6:].strip().split(',')
                         print(f"  Parsed telemetry header with {len(column_map)} columns")
                         # Initialize CSV with header
-                        csv_writer = csv.writer(csv_file)
+                        csv_writer = csv.writer(csv_log_file)
                         csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_columns)
                 else:
                     # Got telemetry data
@@ -360,10 +689,17 @@ def main():
     warmup_duration = time.time() - warmup_start
     print(f"Warmup complete! Sent {warmup_packet_count} packets over {warmup_duration:.1f}s")
 
-    # Reset simulation to start from zero after warmup
-    sim = RocketSimulation(dt=dt, ignition_delay=ignition_delay)
-    print(f"Simulation reset: time={sim.state.time}, altitude={sim.state.position[2]}, velocity={sim.state.velocity[2]}")
-    print(f"Motor will ignite at t={ignition_delay:.1f}s")
+    # Create simulation based on mode
+    if csv_file:
+        sim = CSVSimulation(csv_file, dt, ignition_delay)
+        print(f"CSV simulation loaded: {len(sim.data['time'])} data points")
+        print(f"Flight duration: {max_time:.2f}s, Max altitude: {max(sim.data['altitude']):.2f}m")
+        print(f"Motor will ignite at t={ignition_delay:.1f}s")
+    else:
+        sim = RocketSimulation(dt=dt, ignition_delay=ignition_delay)
+        print(f"Physics simulation initialized: time={sim.state.time}, altitude={sim.state.position[2]}, velocity={sim.state.velocity[2]}")
+        print(f"Motor will ignite at t={ignition_delay:.1f}s")
+
     print(f"Starting flight simulation...\n")
 
     try:
@@ -404,7 +740,7 @@ def main():
                         # Initialize CSV writer with header if needed
                         if csv_writer is None:
                             header_line = line[6:].strip()
-                            csv_writer = csv.writer(csv_file)
+                            csv_writer = csv.writer(csv_log_file)
                             csv_writer.writerow(['SimTime', 'SimAlt', 'SimVel'] + header_line.split(','))
                     else:
                         # Got telemetry data
@@ -460,7 +796,7 @@ def main():
 
                             # Print status every 50 packets (~1 second at 50Hz) or on stage change
                             if (packet_count % 50 == 0) or stage_changed:
-                                # Show pre-launch status differently
+                                # Show pre-launch status differently (both sim types have ignition delay)
                                 if sim.state.time < sim.ignition_delay:
                                     status = f"[PAD HOLD - T-{sim.ignition_delay - sim.state.time:.1f}s]"
                                 else:
@@ -496,9 +832,9 @@ def main():
     except KeyboardInterrupt:
         print("\n\nSimulation interrupted by user.")
     finally:
-        # Close CSV file
-        csv_file.close()
-        print(f"\nTelemetry data saved to '{csv_filename}'")
+        # Close CSV log file
+        csv_log_file.close()
+        print(f"\nTelemetry data saved to '{csv_log_filename}'")
 
     print("-" * 60)
     print(f"\nSimulation complete!")

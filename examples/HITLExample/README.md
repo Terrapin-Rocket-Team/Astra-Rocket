@@ -129,11 +129,38 @@ That's it! The `AstraRocket::update()` function detects HITL mode and:
 - Updates state with simulation time
 - Outputs `TELEM/` via DataLogger
 
-## Customizing the Simulation
+## Using OpenRocket CSV Data
 
-### Modify Flight Profile
+**New!** You can now use realistic flight data from OpenRocket simulations:
 
-Edit `desktop_simulation.py` and adjust rocket parameters:
+### 1. Export from OpenRocket
+
+In OpenRocket:
+1. Run your simulation
+2. Go to **Plot/Export** → **Export data**
+3. Select **All variables** or at minimum: Time, Altitude, Velocity, Acceleration, Pressure, Temperature
+4. Export as CSV
+
+### 2. Run with CSV file
+
+```bash
+# Linux/Mac
+python desktop_simulation.py /dev/ttyACM0 your_rocket.csv
+
+# Windows
+python desktop_simulation.py COM3 FMMORK.csv
+```
+
+The script automatically:
+- Converts feet → meters
+- Converts °F → °C
+- Converts r/s → rad/s
+- Interpolates data to 50Hz
+- Handles missing columns with sensible defaults
+
+### Modify Flight Profile (Physics Mode)
+
+For the built-in physics simulation, edit `desktop_simulation.py` and adjust rocket parameters:
 
 ```python
 # In RocketSimulation.__init__()

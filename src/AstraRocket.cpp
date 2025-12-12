@@ -2,6 +2,7 @@
 #include <RecordData/Logging/EventLogger.h>
 #include <RecordData/Logging/DataLogger.h>
 #include <BlinkBuzz/BlinkBuzz.h>
+#include "RadioLog.h"
 
 // Include all possible sensor implementations for auto-detection
 #include <Sensors/Baro/DPS368.h>
@@ -318,6 +319,10 @@ void AstraRocket::setupLogging() {
     dataSinks[numDataSinks++] = usbLog;
     eventSinks[numEventSinks++] = usbLog;
 
+    RadioLog *rad = new RadioLog(Serial2);
+    dataSinks[numDataSinks++] = rad;
+    eventSinks[numEventSinks++] = rad;
+
     // SD card log for data recording
     FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
     FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
@@ -328,13 +333,16 @@ void AstraRocket::setupLogging() {
 
     // Configure EventLogger
     EventLogger::configure(eventSinks, numEventSinks);
-
+    
     // Now that EventLogger is configured, log the summary
-    LOGI("Logging system initialized with %d sink(s)", numDataSinks);
-
-    // Write test messages to verify SD card is working
-    LOGI("SD card test: If you can read this in events.log, SD logging is working!");
-    LOGI("Timestamp test: %lu ms", millis());
+    for(int i = 0; i < numDataSinks; i++){
+        if(dataSinks[i]->ok()){
+            LOGI("Data sink %d ok.", i);
+        }
+        else{
+            LOGW("Data sink %d FAILED", i);
+        }
+    }
 }
 
 void AstraRocket::handleStageTransition(FlightStage newStage) {
