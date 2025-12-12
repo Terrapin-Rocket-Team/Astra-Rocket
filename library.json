@@ -26,7 +26,7 @@
         
         {
             "name": "Astra",
-            "version": "https://github.com/Terrapin-Rocket-Team/Astra.git"
+            "version": "https://github.com/Terrapin-Rocket-Team/Astra.git#integrate-all-the-things"
         }
     ],
     "frameworks": "arduino",
