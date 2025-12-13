@@ -14,7 +14,6 @@ bool RadioLog::begin()
         s.println("RAD/PING");
         delay(100);
         char buf[150];
-        Serial.println("INITIAL");
         auto timeout = millis();
         int i;
         while (millis() - timeout < 1000)
