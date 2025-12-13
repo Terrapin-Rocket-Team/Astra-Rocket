@@ -7,6 +7,8 @@ AstraRocketConfig::AstraRocketConfig()
       gps(nullptr),
       imu(nullptr),
       highGAccel(nullptr),
+      lowGAccel(nullptr),
+      gyro(nullptr),
       liftoffAccelThreshold(3.0),
       liftoffDetectDuration(100),
       burnoutAccelThreshold(1.5),
@@ -65,6 +67,16 @@ AstraRocketConfig& AstraRocketConfig::withIMU(IMU *imuPtr) {
 
 AstraRocketConfig& AstraRocketConfig::withHighGAccel(Accel *accel) {
     highGAccel = accel;
+    return *this;
+}
+
+AstraRocketConfig& AstraRocketConfig::withAccel(Accel *accel) {
+    lowGAccel = accel;
+    return *this;
+}
+
+AstraRocketConfig& AstraRocketConfig::withGyro(Gyro *gyroPtr) {
+    gyro = gyroPtr;
     return *this;
 }
 
