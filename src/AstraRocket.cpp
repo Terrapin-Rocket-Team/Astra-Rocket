@@ -259,10 +259,21 @@ bool AstraRocket::autoDetectSensors() {
         // Try to use individual sensors instead of IMU (IMU is broken)
         imu = config.getIMU();
         if (!imu) {
-            // Auto-detect individual sensors
-            accel = detectAccel();
-            gyro = detectGyro();
-            mag = detectMag();
+            // Check for configured individual sensors or auto-detect
+            accel = config.getAccel();
+            if (!accel) {
+                accel = detectAccel();
+            }
+
+            gyro = config.getGyro();
+            if (!gyro) {
+                gyro = detectGyro();
+            }
+
+            mag = config.getMag();
+            if (!mag) {
+                mag = detectMag();
+            }
         }
 
         highGAccel = config.getHighGAccel();
@@ -335,8 +346,8 @@ void AstraRocket::setupLogging() {
     EventLogger::configure(eventSinks, numEventSinks);
     
     // Now that EventLogger is configured, log the summary
-    for(int i = 0; i < numDataSinks; i++){
-        if(dataSinks[i]->ok()){
+    for(int i = 0; i < numEventSinks; i++){
+        if(eventSinks[i]->ok()){
             LOGI("Data sink %d ok.", i);
         }
         else{
