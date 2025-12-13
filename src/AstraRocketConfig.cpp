@@ -9,6 +9,7 @@ AstraRocketConfig::AstraRocketConfig()
       highGAccel(nullptr),
       lowGAccel(nullptr),
       gyro(nullptr),
+      mag(nullptr),
       liftoffAccelThreshold(3.0),
       liftoffDetectDuration(100),
       burnoutAccelThreshold(1.5),
@@ -77,6 +78,11 @@ AstraRocketConfig& AstraRocketConfig::withAccel(Accel *accel) {
 
 AstraRocketConfig& AstraRocketConfig::withGyro(Gyro *gyroPtr) {
     gyro = gyroPtr;
+    return *this;
+}
+
+AstraRocketConfig& AstraRocketConfig::withMag(Mag *magPtr) {
+    mag = magPtr;
     return *this;
 }
 

@@ -7,6 +7,7 @@
 #include <Sensors/IMU/IMU.h>
 #include <Sensors/Accel/Accel.h>
 #include <Sensors/Gyro/Gyro.h>
+#include <Sensors/Mag/Mag.h>
 #include <RecordData/Storage/IStorage.h>
 
 using namespace astra;
@@ -58,6 +59,11 @@ public:
      * Set gyroscope (nullptr = auto-detect or disable)
      */
     AstraRocketConfig& withGyro(Gyro *gyro);
+
+    /**
+     * Set magnetometer (nullptr = auto-detect or disable)
+     */
+    AstraRocketConfig& withMag(Mag *mag);
 
     // ===== Flight Detection Thresholds =====
 
@@ -200,6 +206,7 @@ public:
     Accel* getHighGAccel() const { return highGAccel; }
     Accel* getAccel() const { return lowGAccel; }
     Gyro* getGyro() const { return gyro; }
+    Mag* getMag() const { return mag; }
 
     double getLiftoffAccelThreshold() const { return liftoffAccelThreshold; }
     unsigned long getLiftoffDetectDuration() const { return liftoffDetectDuration; }
@@ -233,6 +240,7 @@ private:
     Accel *highGAccel;
     Accel *lowGAccel;
     Gyro *gyro;
+    Mag *mag;
 
     // Flight detection thresholds
     double liftoffAccelThreshold;
