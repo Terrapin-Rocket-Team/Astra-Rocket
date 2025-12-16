@@ -17,6 +17,10 @@
 #include <Sensors/Gyro/BMI088Gyro.h>
 #include <Sensors/Mag/LIS3MDL.h>
 
+#ifndef ASTRA_ROCKET_VERSION
+#define ASTRA_ROCKET_VERSION "UNKNOWN"
+#endif
+
 namespace astra_rocket {
 
 AstraRocket::AstraRocket()
@@ -88,7 +92,7 @@ AstraRocket::~AstraRocket() {
 }
 
 bool AstraRocket::init() {
-    LOGI("AstraRocket initialization starting...");
+    LOGI("Initializing Astra-Rocket version %s", ASTRA_ROCKET_VERSION);
 
     // Setup logging first so we can log initialization progress
     setupLogging();
