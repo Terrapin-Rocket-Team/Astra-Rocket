@@ -14,6 +14,7 @@ RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter, Mahon
       timeInCurrentStage(0),
       stageStartTime(0),
       groundLevelAltitude(0),
+      baroOffset(0),
       altitudeAGL(0),
       maxAltitudeAGL(0),
       previousAltitudeAGL(0),
@@ -41,7 +42,8 @@ RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter, Mahon
 
 void RocketState::setGroundLevel(double altitudeMSL) {
     groundLevelAltitude = altitudeMSL;
-    LOGI("Ground level set to %0.2f m MSL", groundLevelAltitude);
+    baroOffset = altitudeMSL;  // Zero the KF by subtracting this offset from baro readings
+    LOGI("Ground level set to %0.2f m MSL (baro offset applied)", groundLevelAltitude);
 }
 
 void RocketState::setFlightStage(FlightStage stage) {
@@ -57,8 +59,122 @@ void RocketState::setFlightStage(FlightStage stage) {
 }
 
 void RocketState::updateVariables() {
-    // Call parent class update (sensors, filter, base state variables)
-    State::updateVariables();
+    // We need to handle the KF update ourselves to apply the baro offset
+    // So we partially replicate State::updateVariables() logic
+
+    GPS *gps = reinterpret_cast<GPS *>(getSensor("GPS"_i));
+    IMU *imu = reinterpret_cast<IMU *>(getSensor("IMU"_i));
+    Accel *accel_sensor = reinterpret_cast<Accel *>(getSensor("Accelerometer"_i));
+    Gyro *gyro_sensor = reinterpret_cast<Gyro *>(getSensor("Gyroscope"_i));
+    Barometer *baro = reinterpret_cast<Barometer *>(getSensor("Barometer"_i));
+
+    // Determine which sensors are available for orientation
+    bool hasIMU = sensorOK(imu);
+    bool hasAccelGyro = sensorOK(accel_sensor) && sensorOK(gyro_sensor);
+
+    // Update orientation filter if available
+    if (orientationFilter && (hasIMU || hasAccelGyro))
+    {
+        double dt = currentTime - lastTime;
+        Vector<3> accel, gyro;
+
+        // Get accel and gyro data from IMU or separate sensors
+        if (hasIMU)
+        {
+            accel = imu->getAcceleration();
+            gyro = imu->getAngularVelocity();
+        }
+        else
+        {
+            accel = accel_sensor->getAccel();
+            gyro = gyro_sensor->getAngVel();
+        }
+
+        // Automatic mode switching based on accelerometer magnitude
+        if (orientationFilter->isInitialized())
+        {
+            double accelMag = accel.magnitude();
+            double accelError = abs(accelMag - 9.81);
+
+            // Threshold: if accel error < 1 m/s^2, trust the accelerometer
+            if (accelError < 1.0)
+            {
+                if (orientationFilter->getMode() != MahonyMode::CORRECTING)
+                {
+                    orientationFilter->setMode(MahonyMode::CORRECTING);
+                }
+            }
+            else
+            {
+                if (orientationFilter->getMode() != MahonyMode::GYRO_ONLY)
+                {
+                    orientationFilter->setMode(MahonyMode::GYRO_ONLY);
+                }
+            }
+        }
+
+        orientationFilter->update(accel, gyro, dt);
+
+        // Update orientation and earth-frame acceleration from filter
+        if (orientationFilter->isInitialized())
+        {
+            orientation = orientationFilter->getQuaternion();
+            // Get earth-frame acceleration (with gravity subtracted)
+            acceleration = orientationFilter->getEarthAcceleration(accel);
+        }
+    }
+
+    if (filter)
+    {
+        double *measurements = new double[filter->getMeasurementSize()];
+        double *inputs = new double[filter->getInputSize()];
+
+        // gps x y barometer z (WITH OFFSET APPLIED FOR ZEROING)
+        measurements[0] = sensorOK(gps) ? coordinates.x() - origin.x() : 0;
+        measurements[1] = sensorOK(gps) ? coordinates.y() - origin.y() : 0;
+        measurements[2] = baro->getASLAltM() - baroOffset;  // Apply offset here!
+
+        // Earth-frame acceleration inputs (gravity already subtracted by orientation filter)
+        if (orientationFilter && orientationFilter->isInitialized())
+        {
+            inputs[0] = acceleration.x();
+            inputs[1] = acceleration.y();
+            inputs[2] = acceleration.z();
+        }
+        else
+        {
+            inputs[0] = 0.0;
+            inputs[1] = 0.0;
+            inputs[2] = 0.0;
+        }
+
+        stateVars[0] = position.x();
+        stateVars[1] = position.y();
+        stateVars[2] = position.z();
+        stateVars[3] = velocity.x();
+        stateVars[4] = velocity.y();
+        stateVars[5] = velocity.z();
+
+        filter->iterate(currentTime - lastTime, stateVars, measurements, inputs);
+        // pos x, y, z, vel x, y, z
+        position.x() = stateVars[0];
+        position.y() = stateVars[1];
+        position.z() = stateVars[2];
+        velocity.x() = stateVars[3];
+        velocity.y() = stateVars[4];
+        velocity.z() = stateVars[5];
+    }
+
+    if (sensorOK(gps))
+    {
+        coordinates = gps->getHasFix() ? Vector<2>(gps->getPos().x(), gps->getPos().y()) : Vector<2>(0, 0);
+        heading = gps->getHeading();
+    }
+    else
+    {
+        coordinates = Vector<2>(0, 0);
+        heading = 0;
+    }
 
     // Update time in current stage
     unsigned long currentMillis = millis();
@@ -176,11 +292,12 @@ void RocketState::updateMaxValues() {
 void RocketState::detectFlightStage() {
     unsigned long now = millis();
     FlightStage newStage = currentStage;
+    Accel *accel_sensor = static_cast<Accel*>(getSensor("Accelerometer"_i));
 
     switch (currentStage) {
         case PAD_IDLE:
             // Detect liftoff: sustained high vertical acceleration
-            if (verticalAccel > LIFTOFF_ACCEL_THRESHOLD) {
+            if (accel_sensor->getAccel().magnitude() > LIFTOFF_ACCEL_THRESHOLD) {
                 if (!highAccelDetected) {
                     highAccelStartTime = now;
                     highAccelDetected = true;
@@ -195,7 +312,7 @@ void RocketState::detectFlightStage() {
 
         case BOOST:
             // Detect motor burnout: acceleration drops to or below threshold
-            if (verticalAccel <= BURNOUT_ACCEL_THRESHOLD) {
+            if (accel_sensor->getAccel().magnitude() <= BURNOUT_ACCEL_THRESHOLD) {
                 if (!lowAccelDetected) {
                     lowAccelStartTime = now;
                     lowAccelDetected = true;
@@ -210,7 +327,7 @@ void RocketState::detectFlightStage() {
 
         case COAST:
             // Detect apogee: vertical velocity approaches zero
-            if (fabs(verticalVelocity) < APOGEE_VELOCITY_THRESHOLD) {
+            if (fabs(verticalVelocity) < APOGEE_VELOCITY_THRESHOLD || timeInCurrentStage > 25) {
                 newStage = APOGEE;
                 LOGI("APOGEE DETECTED at %0.2f m AGL", altitudeAGL);
             }
