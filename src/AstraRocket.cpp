@@ -7,15 +7,15 @@
 // Include all possible sensor implementations for auto-detection
 #include <Sensors/Baro/DPS368.h>
 #include <Sensors/Baro/BMP390.h>
-#include <Sensors/Baro/MS5611F.h>
+#include <Sensors/Baro/MS5611.h>
 #include <Sensors/GPS/SAM_M10Q.h>
-#include <Sensors/IMU/BMI088andLIS3MDL.h>
-#include <Sensors/IMU/BNO055.h>
+// #include <Sensors/IMU/BMI088andLIS3MDL.h>
+// #include <Sensors/IMU/BNO055.h>
 #include <Sensors/Accel/BMI088Accel.h>
 #include <Sensors/Accel/ADXL375.h>
 #include <Sensors/Accel/H3LIS331DL.h>
 #include <Sensors/Gyro/BMI088Gyro.h>
-#include <Sensors/Mag/LIS3MDL.h>
+// #include <Sensors/Mag/LIS3MDL.h>
 
 #ifndef ASTRA_ROCKET_VERSION
 #define ASTRA_ROCKET_VERSION "UNKNOWN"
@@ -30,7 +30,7 @@ AstraRocket::AstraRocket()
       orientationFilter(nullptr),
       barometer(nullptr),
       gps(nullptr),
-      imu(nullptr),
+    //   imu(nullptr),
       accel(nullptr),
       gyro(nullptr),
       mag(nullptr),
@@ -60,7 +60,7 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
       orientationFilter(nullptr),
       barometer(nullptr),
       gps(nullptr),
-      imu(nullptr),
+    //   imu(nullptr),
       accel(nullptr),
       gyro(nullptr),
       mag(nullptr),
@@ -261,8 +261,8 @@ bool AstraRocket::autoDetectSensors() {
         }
 
         // Try to use individual sensors instead of IMU (IMU is broken)
-        imu = config.getIMU();
-        if (!imu) {
+        // imu = config.getIMU();
+        // if (!imu) {
             // Check for configured individual sensors or auto-detect
             accel = config.getAccel();
             if (!accel) {
@@ -278,7 +278,7 @@ bool AstraRocket::autoDetectSensors() {
             if (!mag) {
                 mag = detectMag();
             }
-        }
+        // }
 
         highGAccel = config.getHighGAccel();
         if (!highGAccel) {
@@ -302,9 +302,9 @@ bool AstraRocket::autoDetectSensors() {
     }
 
     // Use individual sensors instead of IMU
-    if (imu) {
-        sensorArray[numSensors++] = imu;
-    } else {
+    // if (imu) {
+    //     sensorArray[numSensors++] = imu;
+    // } else {
         if (accel) {
             sensorArray[numSensors++] = accel;
         }
@@ -314,7 +314,7 @@ bool AstraRocket::autoDetectSensors() {
         if (mag) {
             sensorArray[numSensors++] = mag;
         }
-    }
+    // }
 
     if (highGAccel) {
         sensorArray[numSensors++] = highGAccel;
@@ -447,7 +447,7 @@ void AstraRocket::updateStatusIndicators() {
 
         // Check all sensors except GPS
         if (barometer && !barometer->isInitialized()) allSensorsGood = false;
-        if (imu && !imu->isInitialized()) allSensorsGood = false;
+        // if (imu && !imu->isInitialized()) allSensorsGood = false;
         if (accel && !accel->isInitialized()) allSensorsGood = false;
         if (gyro && !gyro->isInitialized()) allSensorsGood = false;
         if (mag && !mag->isInitialized()) allSensorsGood = false;
@@ -614,17 +614,17 @@ GPS* AstraRocket::detectGPS() {
     return nullptr;
 }
 
-IMU* AstraRocket::detectIMU() {
-    // Try BNO055
-    BNO055 *bno = new BNO055();
-    if (bno->begin()) {
-        LOGI("Detected BNO055 IMU");
-        return bno;
-    }
-    delete bno;
+// IMU* AstraRocket::detectIMU() {
+//     // Try BNO055
+//     BNO055 *bno = new BNO055();
+//     if (bno->begin()) {
+//         LOGI("Detected BNO055 IMU");
+//         return bno;
+//     }
+//     delete bno;
 
-    return nullptr;
-}
+//     return nullptr;
+// }
 
 Accel* AstraRocket::detectAccel() {
     LOGI("Auto-detecting accelerometer...");
@@ -706,14 +706,14 @@ Mag* AstraRocket::detectMag() {
 
         LOGI("Trying magnetometer at address 0x%02X...", addr);
 
-        // Try LIS3MDL magnetometer
-        astra::LIS3MDL *lis3mdl = new astra::LIS3MDL();
-        if (lis3mdl->begin()) {
-            LOGI("Detected LIS3MDL magnetometer at 0x%02X", addr);
-            claimAddress(addr);
-            return lis3mdl;
-        }
-        delete lis3mdl;
+    //     // Try LIS3MDL magnetometer
+    //     astra::LIS3MDL *lis3mdl = new astra::LIS3MDL();
+    //     if (lis3mdl->begin()) {
+    //         LOGI("Detected LIS3MDL magnetometer at 0x%02X", addr);
+    //         claimAddress(addr);
+    //         return lis3mdl;
+    //     }
+    //     delete lis3mdl;
     }
 
     LOGW("No magnetometer detected");

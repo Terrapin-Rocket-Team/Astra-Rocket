@@ -127,13 +127,14 @@ void RocketState::calculateVerticalComponents() {
         offVerticalAngle = acos(fmax(-1.0, fmin(1.0, cosAngle))) * 180.0 / M_PI;
     } else {
         // Fallback: use acceleration direction (less accurate during high-G)
-        IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
+        // IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
         Accel *accel_sensor = static_cast<Accel*>(getSensor("Accelerometer"_i));
         Vector<3> accelBody(0, 0, 0);
 
-        if (imu && sensorOK(imu)) {
-            accelBody = imu->getAcceleration();
-        } else if (accel_sensor && sensorOK(accel_sensor)) {
+        // if (imu && sensorOK(imu)) {
+        //     accelBody = imu->getAcceleration();
+        // } else 
+        if (accel_sensor && sensorOK(accel_sensor)) {
             accelBody = accel_sensor->getAccel();
         }
 
@@ -152,14 +153,14 @@ void RocketState::calculateVerticalComponents() {
 
 void RocketState::updateMaxValues() {
     // Update maximum acceleration - get from IMU directly
-    IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
-    if (imu && sensorOK(imu)) {
-        Vector<3> accel = imu->getAcceleration();
-        double currentAccelG = accel.magnitude() / 9.81;
-        if (currentAccelG > maxAcceleration) {
-            maxAcceleration = currentAccelG;
-        }
-    }
+    // IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
+    // if (imu && sensorOK(imu)) {
+    //     Vector<3> accel = imu->getAcceleration();
+    //     double currentAccelG = accel.magnitude() / 9.81;
+    //     if (currentAccelG > maxAcceleration) {
+    //         maxAcceleration = currentAccelG;
+    //     }
+    // }
 
     // Update maximum velocity
     double currentVel = velocity.magnitude();

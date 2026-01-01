@@ -105,7 +105,7 @@ public:
     /**
      * Get IMU sensor
      */
-    IMU* getIMU() const { return imu; }
+    // IMU* getIMU() const { return imu; }
 
     /**
      * Get high-G accelerometer
@@ -125,7 +125,7 @@ private:
     // Sensors
     Barometer *barometer;
     GPS *gps;
-    IMU *imu;  // Keep for backwards compatibility, but prefer individual sensors
+    // IMU *imu;  // Keep for backwards compatibility, but prefer individual sensors
     Accel *accel;
     Gyro *gyro;
     Mag *mag;
@@ -166,7 +166,7 @@ private:
     void claimAddress(uint8_t addr);      // Mark address as claimed
     Barometer* detectBarometer();
     GPS* detectGPS();
-    IMU* detectIMU();
+    // IMU* detectIMU();
     Accel* detectAccel();
     Gyro* detectGyro();
     Mag* detectMag();

@@ -5,7 +5,7 @@ namespace astra_rocket {
 AstraRocketConfig::AstraRocketConfig()
     : barometer(nullptr),
       gps(nullptr),
-      imu(nullptr),
+    //   imu(nullptr),
       highGAccel(nullptr),
       lowGAccel(nullptr),
       gyro(nullptr),
@@ -61,10 +61,10 @@ AstraRocketConfig& AstraRocketConfig::withGPS(GPS *gpsPtr) {
     return *this;
 }
 
-AstraRocketConfig& AstraRocketConfig::withIMU(IMU *imuPtr) {
-    imu = imuPtr;
-    return *this;
-}
+// AstraRocketConfig& AstraRocketConfig::withIMU(IMU *imuPtr) {
+//     imu = imuPtr;
+//     return *this;
+// }
 
 AstraRocketConfig& AstraRocketConfig::withHighGAccel(Accel *accel) {
     highGAccel = accel;

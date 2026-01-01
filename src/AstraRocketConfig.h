@@ -43,7 +43,7 @@ public:
     /**
      * Set IMU sensor (nullptr = auto-detect)
      */
-    AstraRocketConfig& withIMU(IMU *imu);
+    // AstraRocketConfig& withIMU(IMU *imu);
 
     /**
      * Set high-G accelerometer (nullptr = auto-detect)
@@ -202,7 +202,7 @@ public:
     // Getters for all configuration parameters
     Barometer* getBarometer() const { return barometer; }
     GPS* getGPS() const { return gps; }
-    IMU* getIMU() const { return imu; }
+    // IMU* getIMU() const { return imu; }
     Accel* getHighGAccel() const { return highGAccel; }
     Accel* getAccel() const { return lowGAccel; }
     Gyro* getGyro() const { return gyro; }
@@ -236,7 +236,7 @@ private:
     // Sensor instances
     Barometer *barometer;
     GPS *gps;
-    IMU *imu;
+    // IMU *imu;
     Accel *highGAccel;
     Accel *lowGAccel;
     Gyro *gyro;
