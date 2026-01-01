@@ -6,3 +6,6 @@
 .idea
 .claude/**
 .claude/settings.local.json
+
+# Auto-generated version tracking
+.version_build_track.json

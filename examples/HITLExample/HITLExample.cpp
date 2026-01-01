@@ -38,7 +38,7 @@ void setup() {
 
     // Configure rocket for HITL mode
     AstraRocketConfig config;
-    config.withHITL(true)                      // Enable HITL mode
+    config//.withHITL(true)                      // Enable HITL mode
           .withUpdateRate(50.0)                 // 50 Hz update rate
           .withPreflightLogRate(50.0)           // Log at full rate in HITL
           .withFlightLogRate(50.0)
