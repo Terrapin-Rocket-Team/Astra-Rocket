@@ -107,6 +107,7 @@ private:
 
     // Altitude tracking
     double groundLevelAltitude;  // MSL altitude of launch pad
+    double baroOffset;           // Offset to subtract from baro before feeding to KF (for zeroing)
     double altitudeAGL;          // Altitude above ground level
     double maxAltitudeAGL;       // Maximum altitude achieved
     double previousAltitudeAGL;  // Previous altitude for velocity calculation
@@ -133,9 +134,9 @@ private:
     void calculateVerticalComponents();
 
     // Stage detection thresholds (can be made configurable)
-    static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0;      // G's
+    static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0 * 9.81;      // m/s's
     static constexpr unsigned long LIFTOFF_DURATION = 100;      // ms
-    static constexpr double BURNOUT_ACCEL_THRESHOLD = 1.5;      // G's
+    static constexpr double BURNOUT_ACCEL_THRESHOLD = 2.0 * 9.81;      // m/s's
     static constexpr unsigned long BURNOUT_DURATION = 200;      // ms
     static constexpr double APOGEE_VELOCITY_THRESHOLD = 2.0;    // m/s
     static constexpr double LANDING_VELOCITY_THRESHOLD = 1.0;   // m/s
