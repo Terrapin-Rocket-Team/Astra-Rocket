@@ -336,7 +336,6 @@ void AstraRocket::setupLogging() {
 
     RadioLog *rad = new RadioLog(Serial2);
     dataSinks[numDataSinks++] = rad;
-    eventSinks[numEventSinks++] = rad;
 
     // SD card log for data recording
     FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);

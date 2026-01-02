@@ -114,7 +114,7 @@ public:
 
 private:
     // Configuration
-    AstraRocketConfig config;
+    AstraRocketConfig &config;
 
     // Core Astra system
     Astra *astraSys;
