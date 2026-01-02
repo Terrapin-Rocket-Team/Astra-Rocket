@@ -12,9 +12,12 @@
 // #include <Sensors/IMU/BMI088andLIS3MDL.h>
 // #include <Sensors/IMU/BNO055.h>
 #include <Sensors/Accel/BMI088Accel.h>
+#include <Sensors/Accel/BNO055Accel.h>
 #include <Sensors/Accel/ADXL375.h>
 #include <Sensors/Accel/H3LIS331DL.h>
 #include <Sensors/Gyro/BMI088Gyro.h>
+#include <Sensors/Gyro/BNO055Gyro.h>
+#include <Sensors/Mag/BNO055Mag.h>
 // #include <Sensors/Mag/LIS3MDL.h>
 
 #ifndef ASTRA_ROCKET_VERSION
@@ -630,7 +633,7 @@ Accel* AstraRocket::detectAccel() {
 
     // Skip I2C scan - try direct initialization at expected addresses
     // This avoids potential timing issues from bus scanning
-    const uint8_t accel_addresses[] = {0x18, 0x19};
+    const uint8_t accel_addresses[] = {0x18, 0x19, 0x28, 0x29};
 
     for (uint8_t addr : accel_addresses) {
         // Skip if already claimed
@@ -651,6 +654,15 @@ Accel* AstraRocket::detectAccel() {
             LOGW("BMI088 accel init failed at 0x%02X with error code: %d", addr, result);
         }
         delete bmi088accel;
+
+        // Try BNO055 accelerometer
+        astra::BNO055Accel *bno055accel = new astra::BNO055Accel(addr);
+        if (bno055accel->begin()) {
+            LOGI("Detected BNO055 accelerometer at 0x%02X", addr);
+            claimAddress(addr);
+            return bno055accel;
+        }
+        delete bno055accel;
     }
 
     LOGW("No accelerometer detected");
@@ -664,7 +676,7 @@ Gyro* AstraRocket::detectGyro() {
     delay(50);
 
     // Skip I2C scan - try direct initialization at expected addresses
-    const uint8_t gyro_addresses[] = {0x68, 0x69};
+    const uint8_t gyro_addresses[] = {0x68, 0x69, 0x28, 0x29};
 
     for (uint8_t addr : gyro_addresses) {
         // Skip if already claimed
@@ -685,6 +697,15 @@ Gyro* AstraRocket::detectGyro() {
             LOGW("BMI088 gyro init failed at 0x%02X with error code: %d", addr, result);
         }
         delete bmi088gyro;
+
+        // Try BNO055 gyroscope
+        astra::BNO055Gyro *bno055gyro = new astra::BNO055Gyro(addr);
+        if (bno055gyro->begin()) {
+            LOGI("Detected BNO055 gyroscope at 0x%02X", addr);
+            claimAddress(addr);
+            return bno055gyro;
+        }
+        delete bno055gyro;
     }
 
     LOGW("No gyroscope detected");
@@ -695,7 +716,7 @@ Mag* AstraRocket::detectMag() {
     LOGI("Auto-detecting magnetometer...");
 
     // Skip I2C scan - try direct initialization at expected addresses
-    const uint8_t mag_addresses[] = {0x1C, 0x1E};
+    const uint8_t mag_addresses[] = {0x1C, 0x1E, 0x28, 0x29};
 
     for (uint8_t addr : mag_addresses) {
         // Skip if already claimed
@@ -713,6 +734,15 @@ Mag* AstraRocket::detectMag() {
     //         return lis3mdl;
     //     }
     //     delete lis3mdl;
+
+        // Try BNO055 magnetometer
+        astra::BNO055Mag *bno055mag = new astra::BNO055Mag(addr);
+        if (bno055mag->begin()) {
+            LOGI("Detected BNO055 magnetometer at 0x%02X", addr);
+            claimAddress(addr);
+            return bno055mag;
+        }
+        delete bno055mag;
     }
 
     LOGW("No magnetometer detected");

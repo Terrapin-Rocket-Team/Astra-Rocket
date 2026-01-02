@@ -63,13 +63,13 @@ void RocketState::updateVariables() {
     // So we partially replicate State::updateVariables() logic
 
     GPS *gps = reinterpret_cast<GPS *>(getSensor("GPS"_i));
-    IMU *imu = reinterpret_cast<IMU *>(getSensor("IMU"_i));
+    // IMU *imu = reinterpret_cast<IMU *>(getSensor("IMU"_i));
     Accel *accel_sensor = reinterpret_cast<Accel *>(getSensor("Accelerometer"_i));
     Gyro *gyro_sensor = reinterpret_cast<Gyro *>(getSensor("Gyroscope"_i));
     Barometer *baro = reinterpret_cast<Barometer *>(getSensor("Barometer"_i));
 
     // Determine which sensors are available for orientation
-    bool hasIMU = sensorOK(imu);
+    bool hasIMU = false;
     bool hasAccelGyro = sensorOK(accel_sensor) && sensorOK(gyro_sensor);
 
     // Update orientation filter if available
@@ -81,8 +81,8 @@ void RocketState::updateVariables() {
         // Get accel and gyro data from IMU or separate sensors
         if (hasIMU)
         {
-            accel = imu->getAcceleration();
-            gyro = imu->getAngularVelocity();
+            // accel = imu->getAcceleration();
+            // gyro = imu->getAngularVelocity();
         }
         else
         {
