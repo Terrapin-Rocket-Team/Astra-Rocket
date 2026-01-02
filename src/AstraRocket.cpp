@@ -131,7 +131,8 @@ bool AstraRocket::init() {
     // Configure BlinkBuzz for status indicators
     if (config.getBuzzerFeedback()) {
         config.getAstraConfig()->withBBAsync(true);
-        config.getAstraConfig()->withBBPin(config.getLEDStatusPin());
+        config.getAstraConfig()->withBuzzerPin(config.getLEDStatusPin());
+
     }
 
     // Add sensor status and GPS status LEDs to BlinkBuzz if configured
