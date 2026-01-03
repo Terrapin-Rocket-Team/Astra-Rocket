@@ -177,6 +177,14 @@ public:
      */
     AstraRocketConfig& withGPSStatusLEDPin(int pin);
 
+    // ===== Radio Configuration =====
+
+    /**
+     * Set radio serial port
+     * Default: Serial2
+     */
+    AstraRocketConfig& withRadioSerial(SerialUART_t &serial);
+
     // ===== HITL (Hardware-In-The-Loop) Configuration =====
 
     /**
@@ -227,6 +235,8 @@ public:
     int getSensorStatusLEDPin() const { return sensorStatusLEDPin; }
     int getGPSStatusLEDPin() const { return gpsStatusLEDPin; }
 
+    SerialUART_t* getRadioSerial() const { return radioSerial; }
+
     bool getHITLEnabled() const { return hitlEnabled; }
 
 private:
@@ -265,6 +275,9 @@ private:
     int ledStatusPin;
     int sensorStatusLEDPin;
     int gpsStatusLEDPin;
+
+    // Radio configuration
+    SerialUART_t *radioSerial;
 
     // HITL configuration
     bool hitlEnabled;

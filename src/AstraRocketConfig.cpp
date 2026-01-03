@@ -44,6 +44,7 @@ AstraRocketConfig::AstraRocketConfig()
       ledStatusPin(LED_BUILTIN),
       sensorStatusLEDPin(-1),
       gpsStatusLEDPin(-1),
+      radioSerial(&Serial2),
       hitlEnabled(false)
 {
     // Configure base AstraConfig with sensible defaults
@@ -167,6 +168,12 @@ AstraRocketConfig& AstraRocketConfig::withSensorStatusLEDPin(int pin) {
 
 AstraRocketConfig& AstraRocketConfig::withGPSStatusLEDPin(int pin) {
     gpsStatusLEDPin = pin;
+    return *this;
+}
+
+// Radio configuration
+AstraRocketConfig& AstraRocketConfig::withRadioSerial(SerialUART_t &serial) {
+    radioSerial = &serial;
     return *this;
 }
 
