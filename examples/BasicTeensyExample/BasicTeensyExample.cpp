@@ -25,7 +25,7 @@
 
 #include <Arduino.h>
 #include <AstraRocket.h>
-#include <Sensors/GPS/MAX_M10S.h>
+#include <Sensors/HW/GPS/MAX_M10S.h>
 
 using namespace astra_rocket;
 

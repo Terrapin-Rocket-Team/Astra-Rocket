@@ -5,20 +5,16 @@
 #include "RadioLog.h"
 
 // Include all possible sensor implementations for auto-detection
-#include <Sensors/Baro/DPS368.h>
-#include <Sensors/Baro/BMP390.h>
-#include <Sensors/Baro/MS5611.h>
-#include <Sensors/GPS/SAM_M10Q.h>
-// #include <Sensors/IMU/BMI088andLIS3MDL.h>
-// #include <Sensors/IMU/BNO055.h>
-#include <Sensors/Accel/BMI088Accel.h>
-#include <Sensors/Accel/BNO055Accel.h>
-#include <Sensors/Accel/ADXL375.h>
-#include <Sensors/Accel/H3LIS331DL.h>
-#include <Sensors/Gyro/BMI088Gyro.h>
-#include <Sensors/Gyro/BNO055Gyro.h>
-#include <Sensors/Mag/BNO055Mag.h>
-// #include <Sensors/Mag/LIS3MDL.h>
+#include <Sensors/HW/Baro/DPS368.h>
+#include <Sensors/HW/Baro/BMP390.h>
+#include <Sensors/HW/Baro/MS5611.h>
+#include <Sensors/HW/GPS/SAM_M10Q.h>
+#include <Sensors/HW/IMU/BMI088.h>
+#include <Sensors/HW/IMU/BNO055.h>
+#include <Sensors/HW/Accel/ADXL375.h>
+#include <Sensors/HW/Accel/H3LIS331DL.h>
+// Note: BMI088Accel, BNO055Accel, BMI088Gyro, BNO055Gyro, BNO055Mag
+// are component classes within the IMU - accessed via getAccelSensor(), getGyroSensor(), getMagSensor()
 
 #ifndef ASTRA_ROCKET_VERSION
 #define ASTRA_ROCKET_VERSION "UNKNOWN"
@@ -35,9 +31,11 @@ AstraRocket::AstraRocket()
       rocketState(nullptr),
       kalmanFilter(nullptr),
       orientationFilter(nullptr),
+      rocketSensorManager(nullptr),
       barometer(nullptr),
       gps(nullptr),
-    //   imu(nullptr),
+      imu6(nullptr),
+      imu9(nullptr),
       accel(nullptr),
       gyro(nullptr),
       mag(nullptr),
@@ -65,9 +63,11 @@ AstraRocket::AstraRocket(AstraRocketConfig &cfg)
       rocketState(nullptr),
       kalmanFilter(nullptr),
       orientationFilter(nullptr),
+      rocketSensorManager(nullptr),
       barometer(nullptr),
       gps(nullptr),
-    //   imu(nullptr),
+      imu6(nullptr),
+      imu9(nullptr),
       accel(nullptr),
       gyro(nullptr),
       mag(nullptr),
@@ -93,6 +93,18 @@ AstraRocket::~AstraRocket() {
     if (rocketState) delete rocketState;
     if (kalmanFilter) delete kalmanFilter;
     if (orientationFilter) delete orientationFilter;
+    if (rocketSensorManager) delete rocketSensorManager;
+
+    // Delete composite IMUs (these own the sensor data)
+    // Note: accel, gyro, mag pointers reference IMU components - do NOT delete them
+    if (imu6) delete imu6;
+    if (imu9) delete imu9;
+
+    // Delete standalone sensors
+    if (barometer) delete barometer;
+    if (gps) delete gps;
+    if (highGAccel) delete highGAccel;
+
     if (sensorArray) delete[] sensorArray;
     if (dataSinks) delete[] dataSinks;
     if (eventSinks) delete[] eventSinks;
@@ -127,9 +139,49 @@ bool AstraRocket::init() {
     rocketState = new RocketState(kalmanFilter, orientationFilter);
     LOGI("RocketState created with Kalman filter and orientation filter");
 
+    // Create and configure RocketSensorManager
+    rocketSensorManager = new RocketSensorManager();
+    if (accel) {
+        rocketSensorManager->withLowGAccel(accel, MountingTransform(MountingOrientation::IDENTITY));
+        LOGI("RocketSensorManager: Low-G accelerometer registered");
+    }
+    if (highGAccel) {
+        rocketSensorManager->withHighGAccel(highGAccel, MountingTransform(MountingOrientation::IDENTITY));
+        LOGI("RocketSensorManager: High-G accelerometer registered");
+    }
+    if (gyro) {
+        rocketSensorManager->withGyro(gyro, MountingTransform(MountingOrientation::IDENTITY));
+        LOGI("RocketSensorManager: Gyroscope registered");
+    }
+    if (mag) {
+        rocketSensorManager->withMag(mag, MountingTransform(MountingOrientation::IDENTITY));
+        LOGI("RocketSensorManager: Magnetometer registered");
+    }
+    if (barometer) {
+        rocketSensorManager->withBaro(barometer);
+        LOGI("RocketSensorManager: Barometer registered");
+    }
+
+    // Initialize the sensor manager
+    if (!rocketSensorManager->begin()) {
+        LOGE("RocketSensorManager initialization failed!");
+        return false;
+    }
+    LOGI("RocketSensorManager initialized successfully");
+
+    // Auto-detect sensor mounting orientations
+    // Assumes rocket is vertical (nose up) during initialization
+    LOGI("Auto-detecting sensor mounting orientations...");
+    if (rocketSensorManager->autoDetectMountingOrientations()) {
+        LOGI("Sensor mounting orientations detected automatically");
+    } else {
+        LOGW("Auto-detection failed or no sensors available - using default orientations");
+    }
+
     // Configure base Astra system
     config.getAstraConfig()->withState(rocketState);
-    config.getAstraConfig()->withSensors(sensorArray, numSensors);  // Sensors managed by Astra's SensorManager
+    config.getAstraConfig()->withSensorManager(rocketSensorManager);  // Use RocketSensorManager for sensor fusion
+    config.getAstraConfig()->withSensors(sensorArray, numSensors);  // Still pass sensors for logging/access
     config.getAstraConfig()->withUpdateRate(50.0);  // 50 Hz default (can be overridden by user config)
     config.getAstraConfig()->withLoggingRate(config.getPreflightLogRate());
     config.getAstraConfig()->withDataLogs(dataSinks, numDataSinks);
@@ -637,123 +689,163 @@ GPS* AstraRocket::detectGPS() {
 // }
 
 Accel* AstraRocket::detectAccel() {
-    LOGI("Auto-detecting accelerometer...");
+    LOGI("Auto-detecting accelerometer (via composite IMU)...");
 
-    // Skip I2C scan - try direct initialization at expected addresses
-    // This avoids potential timing issues from bus scanning
-    const uint8_t accel_addresses[] = {0x18, 0x19, 0x28, 0x29};
+    // Try BMI088 (6DoF IMU) at typical addresses
+    const uint8_t bmi088_accel_addresses[] = {0x18, 0x19};
+    const uint8_t bmi088_gyro_addresses[] = {0x68, 0x69};
 
-    for (uint8_t addr : accel_addresses) {
+    for (uint8_t accel_addr : bmi088_accel_addresses) {
+        // Skip if already claimed
+        if (isAddressClaimed(accel_addr)) {
+            continue;
+        }
+
+        for (uint8_t gyro_addr : bmi088_gyro_addresses) {
+            if (isAddressClaimed(gyro_addr)) {
+                continue;
+            }
+
+            LOGI("Trying BMI088 at accel=0x%02X gyro=0x%02X...", accel_addr, gyro_addr);
+
+            BMI088 *bmi = new BMI088(Wire, accel_addr, gyro_addr);
+            if (bmi->begin()) {
+                LOGI("Detected BMI088 IMU at accel=0x%02X gyro=0x%02X", accel_addr, gyro_addr);
+                claimAddress(accel_addr);
+                claimAddress(gyro_addr);
+                imu6 = bmi;  // Store composite IMU
+                return bmi->getAccelSensor();  // Return component
+            }
+            delete bmi;
+        }
+    }
+
+    // Try BNO055 (9DoF IMU) at typical addresses
+    const uint8_t bno055_addresses[] = {0x28, 0x29};
+
+    for (uint8_t addr : bno055_addresses) {
         // Skip if already claimed
         if (isAddressClaimed(addr)) {
             continue;
         }
 
-        LOGI("Trying accelerometer at address 0x%02X...", addr);
+        LOGI("Trying BNO055 at address 0x%02X...", addr);
 
-        // Try BMI088 accelerometer
-        BMI088Accel *bmi088accel = new BMI088Accel(Wire, addr);
-        int result = bmi088accel->begin();
-        if (result > 0) {
-            LOGI("Detected BMI088 accelerometer at 0x%02X", addr);
+        BNO055 *bno = new BNO055(addr);
+        if (bno->begin()) {
+            LOGI("Detected BNO055 IMU at 0x%02X", addr);
             claimAddress(addr);
-            return bmi088accel;
-        } else {
-            LOGW("BMI088 accel init failed at 0x%02X with error code: %d", addr, result);
+            imu9 = bno;  // Store composite IMU
+            return bno->getAccelSensor();  // Return component
         }
-        delete bmi088accel;
-
-        // Try BNO055 accelerometer
-        astra::BNO055Accel *bno055accel = new astra::BNO055Accel(addr);
-        if (bno055accel->begin()) {
-            LOGI("Detected BNO055 accelerometer at 0x%02X", addr);
-            claimAddress(addr);
-            return bno055accel;
-        }
-        delete bno055accel;
+        delete bno;
     }
 
-    LOGW("No accelerometer detected");
+    LOGW("No accelerometer/IMU detected");
     return nullptr;
 }
 
 Gyro* AstraRocket::detectGyro() {
     LOGI("Auto-detecting gyroscope...");
 
-    // Give extra time after accelerometer init (BMI088 sensors share timing issues)
+    // Check if IMU was already created by detectAccel()
+    if (imu6) {
+        LOGI("Using gyroscope from existing BMI088 IMU");
+        return imu6->getGyroSensor();
+    }
+    if (imu9) {
+        LOGI("Using gyroscope from existing BNO055 IMU");
+        return imu9->getGyroSensor();
+    }
+
+    // No existing IMU - try to create one
+    // Give extra time for I2C bus to settle
     delay(50);
 
-    // Skip I2C scan - try direct initialization at expected addresses
-    const uint8_t gyro_addresses[] = {0x68, 0x69, 0x28, 0x29};
+    // Try BMI088 (6DoF IMU) at typical addresses
+    const uint8_t bmi088_accel_addresses[] = {0x18, 0x19};
+    const uint8_t bmi088_gyro_addresses[] = {0x68, 0x69};
 
-    for (uint8_t addr : gyro_addresses) {
-        // Skip if already claimed
+    for (uint8_t accel_addr : bmi088_accel_addresses) {
+        if (isAddressClaimed(accel_addr)) {
+            continue;
+        }
+
+        for (uint8_t gyro_addr : bmi088_gyro_addresses) {
+            if (isAddressClaimed(gyro_addr)) {
+                continue;
+            }
+
+            LOGI("Trying BMI088 at accel=0x%02X gyro=0x%02X...", accel_addr, gyro_addr);
+
+            BMI088 *bmi = new BMI088(Wire, accel_addr, gyro_addr);
+            if (bmi->begin()) {
+                LOGI("Detected BMI088 IMU at accel=0x%02X gyro=0x%02X", accel_addr, gyro_addr);
+                claimAddress(accel_addr);
+                claimAddress(gyro_addr);
+                imu6 = bmi;
+                return bmi->getGyroSensor();
+            }
+            delete bmi;
+        }
+    }
+
+    // Try BNO055 (9DoF IMU) at typical addresses
+    const uint8_t bno055_addresses[] = {0x28, 0x29};
+
+    for (uint8_t addr : bno055_addresses) {
         if (isAddressClaimed(addr)) {
             continue;
         }
 
-        LOGI("Trying gyroscope at address 0x%02X...", addr);
+        LOGI("Trying BNO055 at address 0x%02X...", addr);
 
-        // Try BMI088 gyroscope
-        BMI088Gyro *bmi088gyro = new BMI088Gyro(Wire, addr);
-        int result = bmi088gyro->begin();
-        if (result > 0) {
-            LOGI("Detected BMI088 gyroscope at 0x%02X", addr);
+        BNO055 *bno = new BNO055(addr);
+        if (bno->begin()) {
+            LOGI("Detected BNO055 IMU at 0x%02X", addr);
             claimAddress(addr);
-            return bmi088gyro;
-        } else {
-            LOGW("BMI088 gyro init failed at 0x%02X with error code: %d", addr, result);
+            imu9 = bno;
+            return bno->getGyroSensor();
         }
-        delete bmi088gyro;
-
-        // Try BNO055 gyroscope
-        astra::BNO055Gyro *bno055gyro = new astra::BNO055Gyro(addr);
-        if (bno055gyro->begin()) {
-            LOGI("Detected BNO055 gyroscope at 0x%02X", addr);
-            claimAddress(addr);
-            return bno055gyro;
-        }
-        delete bno055gyro;
+        delete bno;
     }
 
-    LOGW("No gyroscope detected");
+    LOGW("No gyroscope/IMU detected");
     return nullptr;
 }
 
 Mag* AstraRocket::detectMag() {
     LOGI("Auto-detecting magnetometer...");
 
-    // Skip I2C scan - try direct initialization at expected addresses
-    const uint8_t mag_addresses[] = {0x1C, 0x1E, 0x28, 0x29};
+    // Check if BNO055 (9DoF IMU) was already created by detectAccel() or detectGyro()
+    if (imu9) {
+        LOGI("Using magnetometer from existing BNO055 IMU");
+        return imu9->getMagSensor();
+    }
 
-    for (uint8_t addr : mag_addresses) {
+    // No existing 9DoF IMU - try to create BNO055
+    // Note: BMI088 is only 6DoF (no magnetometer)
+    const uint8_t bno055_addresses[] = {0x28, 0x29};
+
+    for (uint8_t addr : bno055_addresses) {
         // Skip if already claimed
         if (isAddressClaimed(addr)) {
             continue;
         }
 
-        LOGI("Trying magnetometer at address 0x%02X...", addr);
+        LOGI("Trying BNO055 at address 0x%02X...", addr);
 
-    //     // Try LIS3MDL magnetometer
-    //     astra::LIS3MDL *lis3mdl = new astra::LIS3MDL();
-    //     if (lis3mdl->begin()) {
-    //         LOGI("Detected LIS3MDL magnetometer at 0x%02X", addr);
-    //         claimAddress(addr);
-    //         return lis3mdl;
-    //     }
-    //     delete lis3mdl;
-
-        // Try BNO055 magnetometer
-        astra::BNO055Mag *bno055mag = new astra::BNO055Mag(addr);
-        if (bno055mag->begin()) {
-            LOGI("Detected BNO055 magnetometer at 0x%02X", addr);
+        BNO055 *bno = new BNO055(addr);
+        if (bno->begin()) {
+            LOGI("Detected BNO055 IMU at 0x%02X", addr);
             claimAddress(addr);
-            return bno055mag;
+            imu9 = bno;
+            return bno->getMagSensor();
         }
-        delete bno055mag;
+        delete bno;
     }
 
-    LOGW("No magnetometer detected");
+    LOGW("No magnetometer/9DoF IMU detected");
     return nullptr;
 }
 

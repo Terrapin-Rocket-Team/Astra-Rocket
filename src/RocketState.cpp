@@ -5,6 +5,7 @@
 #include <Sensors/Gyro/Gyro.h>
 #include <Sensors/Baro/Barometer.h>
 #include <Sensors/GPS/GPS.h>
+#include <Sensors/SensorManager/ISensorManager.h>
 
 using namespace astra;
 
@@ -90,8 +91,11 @@ void RocketState::updateMeasurements(const Vector<3> &gpsPos, double baroAlt, bo
 }
 
 void RocketState::calculateVerticalComponents() {
-    // Calculate altitude AGL using findSensor (inherited from State)
-    Barometer *baro = static_cast<Barometer*>(findSensor("Barometer"_i));
+    // Calculate altitude AGL using sensor manager
+    Barometer *baro = nullptr;
+    if (sensorManager) {
+        baro = sensorManager->getActiveBaro();
+    }
     if (baro && baro->isInitialized()) {
         double altitudeMSL = baro->getASLAltM();
         altitudeAGL = altitudeMSL - groundLevelAltitude;
@@ -145,7 +149,10 @@ void RocketState::calculateVerticalComponents() {
         offVerticalAngle = acos(fmax(-1.0, fmin(1.0, cosAngle))) * 180.0 / M_PI;
     } else {
         // Fallback: use acceleration direction (less accurate during high-G)
-        Accel *accel_sensor = findAccel();
+        Accel *accel_sensor = nullptr;
+        if (sensorManager) {
+            accel_sensor = sensorManager->getActiveAccel();
+        }
         Vector<3> accelBody(0, 0, 0);
 
         if (accel_sensor && accel_sensor->isInitialized()) {
@@ -167,7 +174,10 @@ void RocketState::calculateVerticalComponents() {
 
 void RocketState::updateMaxValues() {
     // Update maximum acceleration from accelerometer
-    Accel *accel_sensor = findAccel();
+    Accel *accel_sensor = nullptr;
+    if (sensorManager) {
+        accel_sensor = sensorManager->getActiveAccel();
+    }
     if (accel_sensor && accel_sensor->isInitialized()) {
         Vector<3> accel = accel_sensor->getAccel();
         double currentAccelG = accel.magnitude() / 9.81;
@@ -191,7 +201,10 @@ void RocketState::updateMaxValues() {
 void RocketState::detectFlightStage() {
     unsigned long now = millis();
     FlightStage newStage = currentStage;
-    Accel *accel_sensor = findAccel();
+    Accel *accel_sensor = nullptr;
+    if (sensorManager) {
+        accel_sensor = sensorManager->getActiveAccel();
+    }
 
     // Need accelerometer for flight stage detection
     if (!accel_sensor || !accel_sensor->isInitialized()) {

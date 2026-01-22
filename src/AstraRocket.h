@@ -9,7 +9,8 @@
 #include <Sensors/GPS/GPS.h>
 #include <Sensors/Gyro/Gyro.h>
 #include <Sensors/Mag/Mag.h>
-#include <Sensors/IMU/IMU.h>
+#include <Sensors/IMU/IMU6DoF.h>
+#include <Sensors/IMU/IMU9DoF.h>
 #include <Sensors/HITL/HITL.h>
 #include <Testing/HITLParser.h>
 
@@ -17,6 +18,7 @@
 #include "RocketState.h"
 #include "RocketKF.h"
 #include "FlightStage.h"
+#include "RocketSensorManager.h"
 
 using namespace astra;
 
@@ -123,14 +125,24 @@ private:
     RocketKF *kalmanFilter;
     MahonyAHRS *orientationFilter;
 
+    // Sensor management
+    RocketSensorManager *rocketSensorManager;
+
     // Sensors
     Barometer *barometer;
     GPS *gps;
-    // IMU *imu;  // Keep for backwards compatibility, but prefer individual sensors
+
+    // Composite IMUs (owned by AstraRocket, must be deleted in destructor)
+    // These contain the actual sensor data; accel/gyro/mag pointers reference their components
+    IMU6DoF *imu6;   // BMI088 or similar 6DoF IMU
+    IMU9DoF *imu9;   // BNO055 or similar 9DoF IMU
+
+    // Component sensor pointers (reference IMU components, do NOT delete these)
     Accel *accel;
     Gyro *gyro;
     Mag *mag;
     Accel *highGAccel;
+
     Sensor **sensorArray;
     int numSensors;
 

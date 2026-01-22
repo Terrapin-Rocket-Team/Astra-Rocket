@@ -169,7 +169,12 @@ public:
     bool init() override
     {
         angVel = Vector<3>{0, 0, 0};
-        return initialized;
+        return true;
+    }
+
+    bool isInitialized() const override
+    {
+        return true;
     }
 };
 

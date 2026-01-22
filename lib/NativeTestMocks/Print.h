@@ -28,11 +28,31 @@ public:
             return 0;
         return write(reinterpret_cast<const uint8_t *>(s), std::strlen(s));
     }
+
+    size_t print(double d, int precision = 2)
+    {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.*f", precision, d);
+        return print(buf);
+    }
+
+    size_t print(int i)
+    {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", i);
+        return print(buf);
+    }
+
     size_t println(const char *s)
     {
         size_t n = print(s);
         n += write(reinterpret_cast<const uint8_t *>("\n"), 1);
         return n;
+    }
+
+    size_t println()
+    {
+        return write(reinterpret_cast<const uint8_t *>("\n"), 1);
     }
     // Add these methods inside your Print-compatible class:
     size_t vprintf(const char *fmt, va_list ap)

@@ -5,7 +5,7 @@
 #include <BlinkBuzz/BlinkBuzz.h>
 #include "NativeFileLog.h"
 #include <string>
-#ifdef PIO_UNIT_TESTING
+#if defined(PIO_UNIT_TESTING) && !defined(UNITY_INCLUDE_DOUBLE)
 #define UNITY_INCLUDE_DOUBLE
 #include <unity.h>
 #endif // PIO_UNIT_TESTING

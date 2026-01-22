@@ -4,7 +4,6 @@
 #include <Utils/AstraConfig.h>
 #include <Sensors/Baro/Barometer.h>
 #include <Sensors/GPS/GPS.h>
-#include <Sensors/IMU/IMU.h>
 #include <Sensors/Accel/Accel.h>
 #include <Sensors/Gyro/Gyro.h>
 #include <Sensors/Mag/Mag.h>

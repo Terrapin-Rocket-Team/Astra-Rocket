@@ -7,7 +7,8 @@ bool useFakeMillis = false;
 WireClass Wire;
 uint64_t millis()
 {
-    if (useFakeMillis) {
+    if (useFakeMillis)
+    {
         return fakeMillis;
     }
     return (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() - start);
@@ -26,7 +27,7 @@ void resetMillis()
 }
 
 #ifndef WIN32
-void Sleep(long ms) {}
+void Sleep(long ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 #endif
 
 void delay(unsigned long ms) { Sleep(ms); }
@@ -64,11 +65,15 @@ void Stream::clearBuffer()
     fakeBuffer[0] = '\0';
 }
 
-int Stream::readBytesUntil(char c, char *i, size_t len) {return 0;}
+int Stream::readBytesUntil(char c, char *i, size_t len) { return 0; }
 
 bool Stream::available() { return true; }
 
-size_t Stream::write(uint8_t b) { fakeBuffer[cursor++] = b; return 1;}
+size_t Stream::write(uint8_t b)
+{
+    fakeBuffer[cursor++] = b;
+    return 1;
+}
 
 SerialClass Serial;
 CrashReportClass CrashReport;
