@@ -114,6 +114,7 @@ public:
 
 private:
     // Configuration
+    static AstraRocketConfig defaultConfig;  // Static default configuration
     AstraRocketConfig &config;
 
     // Core Astra system
@@ -173,8 +174,8 @@ private:
     Accel* detectHighGAccel();
 
     // Constants
-    static constexpr int MAX_SENSORS = 10;
-    static constexpr int MAX_LOG_SINKS = 5;
+    static constexpr int ASTRA_ROCKET_MAX_SENSORS = 10;
+    static constexpr int ASTRA_ROCKET_MAX_LOG_SINKS = 5;
 };
 
 } // namespace astra_rocket

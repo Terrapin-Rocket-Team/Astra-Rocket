@@ -6,23 +6,30 @@
 #include <cmath>
 
 using namespace astra_rocket;
+using namespace astra;
 
 // Mock sensors for testing
 FakeBarometer fakeBaro;
-FakeIMU fakeIMU;
-Sensor* testSensors[2];
+FakeAccel fakeAccel;
+FakeGyro fakeGyro;
+Sensor* testSensors[3];
 RocketState* state;
 
 void setUp(void)
 {
     // set stuff up before each test here, if needed
     testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
+    testSensors[1] = &fakeAccel;
+    testSensors[2] = &fakeGyro;
 
     fakeBaro.init();
-    fakeIMU.init();
+    fakeAccel.init();
+    fakeGyro.init();
 
-    state = new RocketState(testSensors, 2);
+    // Create RocketState with new API
+    state = new RocketState();
+    state->withSensors(testSensors, 3);
+    state->begin();
     state->setGroundLevel(0.0);
 
     setMillis(0);
@@ -36,11 +43,23 @@ void tearDown(void)
     resetMillis();
 }
 
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeAccel.getAccel();
+    Vector<3> gyro = fakeGyro.getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+}
+
 // ===== BASIC INITIALIZATION TESTS =====
 
 void test_rocket_state_initialization() {
     // Test that RocketState can be instantiated with no sensors
-    RocketState emptyState(nullptr, 0);
+    RocketState emptyState;
 
     // Verify initial flight stage is PAD_IDLE
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, emptyState.getFlightStage());
@@ -59,7 +78,7 @@ void test_ground_level_setting() {
 
     // Set barometer to ground level
     fakeBaro.setAltitude(100.0);
-    state->update();
+    simulateUpdate();
 
     // AGL should be 0 when at ground level
     TEST_ASSERT_EQUAL_DOUBLE(0.0, state->getAltitudeAGL());
@@ -84,7 +103,7 @@ void test_ground_level_negative() {
     state->setGroundLevel(-86.0); // Death Valley elevation
 
     fakeBaro.setAltitude(0.0); // Sea level
-    state->update();
+    simulateUpdate();
 
     // AGL should be 86m above ground
     TEST_ASSERT_EQUAL_DOUBLE(86.0, state->getAltitudeAGL());
@@ -95,7 +114,7 @@ void test_ground_level_high_altitude() {
     state->setGroundLevel(3640.0); // ~12,000 ft
 
     fakeBaro.setAltitude(3640.0);
-    state->update();
+    simulateUpdate();
 
     // AGL should be 0 at launch site
     TEST_ASSERT_EQUAL_DOUBLE(0.0, state->getAltitudeAGL());
@@ -103,14 +122,14 @@ void test_ground_level_high_altitude() {
     // At 4000m MSL = 360m AGL
     fakeBaro.setAltitude(4000.0);
     setMillis(100);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL_DOUBLE(360.0, state->getAltitudeAGL());
 }
 
 void test_ground_level_not_set() {
     // Test behavior when ground level is never set (defaults to 0)
     fakeBaro.setAltitude(100.0);
-    state->update();
+    simulateUpdate();
 
     // AGL should be altitude MSL when ground = 0
     TEST_ASSERT_EQUAL_DOUBLE(100.0, state->getAltitudeAGL());
@@ -121,7 +140,7 @@ void test_negative_altitude_agl() {
     state->setGroundLevel(100.0);
 
     fakeBaro.setAltitude(95.0); // 5m below launch site
-    state->update();
+    simulateUpdate();
 
     TEST_ASSERT_EQUAL_DOUBLE(-5.0, state->getAltitudeAGL());
 }
@@ -131,8 +150,8 @@ void test_negative_altitude_agl() {
 void test_vertical_acceleration_zero() {
     // Test with zero acceleration (free fall)
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, 0});
+    simulateUpdate();
 
     double vertAccel = state->getVerticalAcceleration();
     // Should be close to 0
@@ -142,8 +161,8 @@ void test_vertical_acceleration_zero() {
 void test_vertical_acceleration_high_g() {
     // Test with very high acceleration (200G)
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -1962.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 200G
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -1962.0}); // 200G
+    simulateUpdate();
 
     double vertAccel = state->getVerticalAcceleration();
     // Should be approximately 200G
@@ -153,8 +172,8 @@ void test_vertical_acceleration_high_g() {
 void test_vertical_acceleration_negative() {
     // Test with upward acceleration in NED frame (negative z)
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, 9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // -1G in NED
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, 9.81}); // -1G in NED
+    simulateUpdate();
 
     double vertAccel = state->getVerticalAcceleration();
     // Should be approximately -1G (downward)
@@ -167,20 +186,20 @@ void test_max_acceleration_tracking() {
     state->setFlightStage(FlightStage::BOOST);
 
     // Start with low acceleration
-    fakeIMU.set(Vector<3>{0, 0, -19.62}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 2G
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -19.62}); // 2G
+    simulateUpdate();
     TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 1.9);
 
     // Increase to 10G
-    fakeIMU.set(Vector<3>{0, 0, -98.1}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 10G
+    fakeAccel.set(Vector<3>{0, 0, -98.1}); // 10G
     setMillis(100);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 9.0);
 
     // Drop back to 2G - max should stay at 10G
-    fakeIMU.set(Vector<3>{0, 0, -19.62}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -19.62});
     setMillis(200);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 9.0);
 }
 
@@ -192,7 +211,7 @@ void test_max_velocity_tracking() {
     for (int i = 0; i < 10; i++) {
         fakeBaro.setAltitude(100.0 + i * 10.0);
         setMillis(i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     double maxVel1 = state->getMaxVelocity();
@@ -201,7 +220,7 @@ void test_max_velocity_tracking() {
     for (int i = 0; i < 10; i++) {
         fakeBaro.setAltitude(200.0 - i * 10.0);
         setMillis(1000 + i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     double maxVel2 = state->getMaxVelocity();
@@ -215,7 +234,7 @@ void test_max_altitude_tracking() {
     for (int i = 0; i < 50; i++) {
         fakeBaro.setAltitude(i * 20.0); // Up to 1000m
         setMillis(i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     double maxAlt1 = state->getAltitudeAGL();
@@ -225,7 +244,7 @@ void test_max_altitude_tracking() {
     for (int i = 0; i < 50; i++) {
         fakeBaro.setAltitude(1000.0 - i * 10.0);
         setMillis(5000 + i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     double currentAlt = state->getAltitudeAGL();
@@ -239,8 +258,8 @@ void test_max_altitude_tracking() {
 void test_off_vertical_angle_vertical_flight() {
     // Test perfectly vertical flight
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // Straight up
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -30.0}); // Straight up
+    simulateUpdate();
 
     double angle = state->getOffVerticalAngle();
     // Should be close to 0 degrees
@@ -250,8 +269,8 @@ void test_off_vertical_angle_vertical_flight() {
 void test_off_vertical_angle_horizontal_flight() {
     // Test horizontal flight
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{30.0, 0, 0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // Horizontal
-    state->update();
+    fakeAccel.set(Vector<3>{30.0, 0, 0}); // Horizontal
+    simulateUpdate();
 
     double angle = state->getOffVerticalAngle();
     // Should be close to 90 degrees
@@ -261,8 +280,8 @@ void test_off_vertical_angle_horizontal_flight() {
 void test_off_vertical_angle_zero_acceleration() {
     // Test with zero acceleration (no orientation info)
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, 0});
+    simulateUpdate();
 
     double angle = state->getOffVerticalAngle();
     // Should default to 0 when no acceleration
@@ -275,11 +294,11 @@ void test_time_in_stage_rollover() {
     // Test behavior at long durations
     state->setFlightStage(FlightStage::PAD_IDLE);
     setMillis(0);
-    state->update();
+    simulateUpdate();
 
     // Simulate 1 hour on pad
     setMillis(3600000); // 1 hour in ms
-    state->update();
+    simulateUpdate();
 
     double timeInStage = state->getTimeInStage();
     TEST_ASSERT_TRUE(timeInStage >= 3590.0 && timeInStage <= 3610.0); // ~3600 seconds
@@ -289,18 +308,18 @@ void test_time_in_stage_rapid_transitions() {
     // Test rapid stage changes
     setMillis(0);
     state->setFlightStage(FlightStage::BOOST);
-    state->update();
+    simulateUpdate();
 
     setMillis(100);
     state->setFlightStage(FlightStage::COAST);
-    state->update();
+    simulateUpdate();
 
     double time1 = state->getTimeInStage();
     TEST_ASSERT_TRUE(time1 >= 0.0 && time1 <= 0.2);
 
     setMillis(200);
     state->setFlightStage(FlightStage::APOGEE);
-    state->update();
+    simulateUpdate();
 
     double time2 = state->getTimeInStage();
     TEST_ASSERT_TRUE(time2 >= 0.0 && time2 <= 0.2);
@@ -311,8 +330,8 @@ void test_time_in_stage_rapid_transitions() {
 void test_all_getters_return_valid_values() {
     // Verify all getters return finite values
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -19.62}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -19.62});
+    simulateUpdate();
 
     TEST_ASSERT_TRUE(std::isfinite(state->getAltitudeAGL()));
     TEST_ASSERT_TRUE(std::isfinite(state->getVerticalVelocity()));
@@ -327,8 +346,9 @@ void test_all_getters_return_valid_values() {
 
 void test_getters_no_sensors() {
     // Test that getters work even with no sensors
-    RocketState emptyState(nullptr, 0);
-    emptyState.update();
+    RocketState emptyState;
+    // Call updateOrientation with dummy data
+    emptyState.updateOrientation(Vector<3>(0,0,0), Vector<3>(0,0,-9.81), 0.02);
 
     // Should not crash and return valid (possibly zero) values
     TEST_ASSERT_TRUE(std::isfinite(emptyState.getAltitudeAGL()));
@@ -341,14 +361,14 @@ void test_getters_no_sensors() {
 void test_extreme_altitude_values() {
     // Test very high altitude (space boundary ~100km)
     fakeBaro.setAltitude(100000.0);
-    state->update();
+    simulateUpdate();
 
     TEST_ASSERT_EQUAL_DOUBLE(100000.0, state->getAltitudeAGL());
 
     // Test very low altitude
     fakeBaro.setAltitude(0.01);
     setMillis(100);
-    state->update();
+    simulateUpdate();
 
     TEST_ASSERT_EQUAL_DOUBLE(0.01, state->getAltitudeAGL());
 }
@@ -357,9 +377,9 @@ void test_sensor_update_frequency() {
     // Test that multiple updates work correctly
     for (int i = 0; i < 1000; i++) {
         fakeBaro.setAltitude(i * 0.1);
-        fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+        fakeAccel.set(Vector<3>{0, 0, -9.81});
         setMillis(i * 10);
-        state->update();
+        simulateUpdate();
     }
 
     // Should complete without errors
@@ -375,11 +395,11 @@ void test_stage_transition_time_reset() {
 
     // Set high acceleration to stay in BOOST (above 1.5G threshold)
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 3G
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -30.0}); // 3G
+    simulateUpdate();
 
     setMillis(2000);
-    state->update();
+    simulateUpdate();
     double boostTime = state->getTimeInStage();
     TEST_ASSERT_TRUE(boostTime >= 1.8 && boostTime <= 2.2);
 
@@ -387,8 +407,8 @@ void test_stage_transition_time_reset() {
     setMillis(2100);
     state->setFlightStage(FlightStage::COAST);
     // Set low acceleration for coast
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 1G
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -9.81}); // 1G
+    simulateUpdate();
 
     double coastTime = state->getTimeInStage();
     TEST_ASSERT_TRUE(coastTime >= 0.0 && coastTime <= 0.3); // Should reset

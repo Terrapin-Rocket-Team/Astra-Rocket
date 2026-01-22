@@ -2,13 +2,16 @@
 #include <RecordData/Logging/EventLogger.h>
 #include <Math/Vector.h>
 #include <Sensors/Accel/Accel.h>
+#include <Sensors/Gyro/Gyro.h>
+#include <Sensors/Baro/Barometer.h>
+#include <Sensors/GPS/GPS.h>
 
 using namespace astra;
 
 namespace astra_rocket {
 
-RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter, MahonyAHRS *orientationFilter)
-    : State(sensors, numSensors, filter, orientationFilter),
+RocketState::RocketState(Filter *filter, MahonyAHRS *orientationFilter)
+    : State(filter, orientationFilter),
       currentStage(PAD_IDLE),
       previousStage(PAD_IDLE),
       timeInCurrentStage(0),
@@ -40,6 +43,11 @@ RocketState::RocketState(Sensor **sensors, int numSensors, Filter *filter, Mahon
     addColumn("%0.3f", &timeInCurrentStage, "Time in Stage (s)");
 }
 
+bool RocketState::begin() {
+    // Call parent begin() which handles filter initialization and orientation calibration
+    return State::begin();
+}
+
 void RocketState::setGroundLevel(double altitudeMSL) {
     groundLevelAltitude = altitudeMSL;
     baroOffset = altitudeMSL;  // Zero the KF by subtracting this offset from baro readings
@@ -58,139 +66,33 @@ void RocketState::setFlightStage(FlightStage stage) {
     }
 }
 
-void RocketState::updateVariables() {
-    // We need to handle the KF update ourselves to apply the baro offset
-    // So we partially replicate State::updateVariables() logic
-
-    GPS *gps = reinterpret_cast<GPS *>(getSensor("GPS"_i));
-    // IMU *imu = reinterpret_cast<IMU *>(getSensor("IMU"_i));
-    Accel *accel_sensor = reinterpret_cast<Accel *>(getSensor("Accelerometer"_i));
-    Gyro *gyro_sensor = reinterpret_cast<Gyro *>(getSensor("Gyroscope"_i));
-    Barometer *baro = reinterpret_cast<Barometer *>(getSensor("Barometer"_i));
-
-    // Determine which sensors are available for orientation
-    bool hasIMU = false;
-    bool hasAccelGyro = sensorOK(accel_sensor) && sensorOK(gyro_sensor);
-
-    // Update orientation filter if available
-    if (orientationFilter && (hasIMU || hasAccelGyro))
-    {
-        double dt = currentTime - lastTime;
-        Vector<3> accel, gyro;
-
-        // Get accel and gyro data from IMU or separate sensors
-        if (hasIMU)
-        {
-            // accel = imu->getAcceleration();
-            // gyro = imu->getAngularVelocity();
-        }
-        else
-        {
-            accel = accel_sensor->getAccel();
-            gyro = gyro_sensor->getAngVel();
-        }
-
-        // Automatic mode switching based on accelerometer magnitude
-        if (orientationFilter->isInitialized())
-        {
-            double accelMag = accel.magnitude();
-            double accelError = abs(accelMag - 9.81);
-
-            // Threshold: if accel error < 1 m/s^2, trust the accelerometer
-            if (accelError < 1.0)
-            {
-                if (orientationFilter->getMode() != MahonyMode::CORRECTING)
-                {
-                    orientationFilter->setMode(MahonyMode::CORRECTING);
-                }
-            }
-            else
-            {
-                if (orientationFilter->getMode() != MahonyMode::GYRO_ONLY)
-                {
-                    orientationFilter->setMode(MahonyMode::GYRO_ONLY);
-                }
-            }
-        }
-
-        orientationFilter->update(accel, gyro, dt);
-
-        // Update orientation and earth-frame acceleration from filter
-        if (orientationFilter->isInitialized())
-        {
-            orientation = orientationFilter->getQuaternion();
-            // Get earth-frame acceleration (with gravity subtracted)
-            acceleration = orientationFilter->getEarthAcceleration(accel);
-        }
-    }
-
-    if (filter)
-    {
-        double *measurements = new double[filter->getMeasurementSize()];
-        double *inputs = new double[filter->getInputSize()];
-
-        // gps x y barometer z (WITH OFFSET APPLIED FOR ZEROING)
-        measurements[0] = sensorOK(gps) ? coordinates.x() - origin.x() : 0;
-        measurements[1] = sensorOK(gps) ? coordinates.y() - origin.y() : 0;
-        measurements[2] = baro->getASLAltM() - baroOffset;  // Apply offset here!
-
-        // Earth-frame acceleration inputs (gravity already subtracted by orientation filter)
-        if (orientationFilter && orientationFilter->isInitialized())
-        {
-            inputs[0] = acceleration.x();
-            inputs[1] = acceleration.y();
-            inputs[2] = acceleration.z();
-        }
-        else
-        {
-            inputs[0] = 0.0;
-            inputs[1] = 0.0;
-            inputs[2] = 0.0;
-        }
-
-        stateVars[0] = position.x();
-        stateVars[1] = position.y();
-        stateVars[2] = position.z();
-        stateVars[3] = velocity.x();
-        stateVars[4] = velocity.y();
-        stateVars[5] = velocity.z();
-
-        filter->iterate(currentTime - lastTime, stateVars, measurements, inputs);
-        // pos x, y, z, vel x, y, z
-        position.x() = stateVars[0];
-        position.y() = stateVars[1];
-        position.z() = stateVars[2];
-        velocity.x() = stateVars[3];
-        velocity.y() = stateVars[4];
-        velocity.z() = stateVars[5];
-    }
-
-    if (sensorOK(gps))
-    {
-        coordinates = gps->getHasFix() ? Vector<2>(gps->getPos().x(), gps->getPos().y()) : Vector<2>(0, 0);
-        heading = gps->getHeading();
-    }
-    else
-    {
-        coordinates = Vector<2>(0, 0);
-        heading = 0;
-    }
+void RocketState::updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, double dt) {
+    // Call parent implementation first - handles orientation filter updates
+    State::updateOrientation(gyro, accel, dt);
 
     // Update time in current stage
     unsigned long currentMillis = millis();
     timeInCurrentStage = (currentMillis - stageStartTime) / 1000.0;
 
-    // Calculate rocket-specific derived values
+    // Calculate rocket-specific derived values that depend on orientation
     calculateVerticalComponents();
     updateMaxValues();
     detectFlightStage();
     updateApogeeEstimate();
 }
 
+void RocketState::updateMeasurements(const Vector<3> &gpsPos, double baroAlt, bool hasGPS, bool hasBaro, double newTime) {
+    // Apply barometer offset before calling parent implementation
+    double adjustedBaroAlt = baroAlt - baroOffset;
+
+    // Call parent implementation with adjusted baro altitude
+    State::updateMeasurements(gpsPos, adjustedBaroAlt, hasGPS, hasBaro, newTime);
+}
+
 void RocketState::calculateVerticalComponents() {
-    // Calculate altitude AGL
-    Barometer *baro = static_cast<Barometer*>(getSensor("Barometer"_i));
-    if (baro && sensorOK(baro)) {
+    // Calculate altitude AGL using findSensor (inherited from State)
+    Barometer *baro = static_cast<Barometer*>(findSensor("Barometer"_i));
+    if (baro && baro->isInitialized()) {
         double altitudeMSL = baro->getASLAltM();
         altitudeAGL = altitudeMSL - groundLevelAltitude;
     }
@@ -243,14 +145,10 @@ void RocketState::calculateVerticalComponents() {
         offVerticalAngle = acos(fmax(-1.0, fmin(1.0, cosAngle))) * 180.0 / M_PI;
     } else {
         // Fallback: use acceleration direction (less accurate during high-G)
-        // IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
-        Accel *accel_sensor = static_cast<Accel*>(getSensor("Accelerometer"_i));
+        Accel *accel_sensor = findAccel();
         Vector<3> accelBody(0, 0, 0);
 
-        // if (imu && sensorOK(imu)) {
-        //     accelBody = imu->getAcceleration();
-        // } else 
-        if (accel_sensor && sensorOK(accel_sensor)) {
+        if (accel_sensor && accel_sensor->isInitialized()) {
             accelBody = accel_sensor->getAccel();
         }
 
@@ -268,15 +166,15 @@ void RocketState::calculateVerticalComponents() {
 }
 
 void RocketState::updateMaxValues() {
-    // Update maximum acceleration - get from IMU directly
-    // IMU *imu = static_cast<IMU*>(getSensor("IMU"_i));
-    // if (imu && sensorOK(imu)) {
-    //     Vector<3> accel = imu->getAcceleration();
-    //     double currentAccelG = accel.magnitude() / 9.81;
-    //     if (currentAccelG > maxAcceleration) {
-    //         maxAcceleration = currentAccelG;
-    //     }
-    // }
+    // Update maximum acceleration from accelerometer
+    Accel *accel_sensor = findAccel();
+    if (accel_sensor && accel_sensor->isInitialized()) {
+        Vector<3> accel = accel_sensor->getAccel();
+        double currentAccelG = accel.magnitude() / 9.81;
+        if (currentAccelG > maxAcceleration) {
+            maxAcceleration = currentAccelG;
+        }
+    }
 
     // Update maximum velocity
     double currentVel = velocity.magnitude();
@@ -293,7 +191,12 @@ void RocketState::updateMaxValues() {
 void RocketState::detectFlightStage() {
     unsigned long now = millis();
     FlightStage newStage = currentStage;
-    Accel *accel_sensor = static_cast<Accel*>(getSensor("Accelerometer"_i));
+    Accel *accel_sensor = findAccel();
+
+    // Need accelerometer for flight stage detection
+    if (!accel_sensor || !accel_sensor->isInitialized()) {
+        return;
+    }
 
     switch (currentStage) {
         case PAD_IDLE:

@@ -26,6 +26,19 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// Arduino helper functions
+template<typename T>
+T constrain(T x, T low, T high) {
+    if (x < low) return low;
+    if (x > high) return high;
+    return x;
+}
+
+template<typename T, typename U, typename V>
+T map(T x, U in_min, U in_max, V out_min, V out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
 uint64_t millis();
 
 void setMillis(uint64_t ms);
@@ -45,6 +58,7 @@ public:
     void end();
     void clearBuffer();
     bool available();
+    int read() { return -1; }  // Mock read - returns -1 (no data)
     int readBytesUntil(char i, char *buf, size_t s);
     size_t write(uint8_t b) override;
     operator bool() { return true; }

@@ -6,21 +6,27 @@
 #include <cmath>
 
 using namespace astra_rocket;
+using namespace astra;
 
 // Test fixtures
 FakeBarometer fakeBaro;
-FakeIMU fakeIMU;
-Sensor* testSensors[2];
+FakeAccel fakeAccel;
+FakeGyro fakeGyro;
+Sensor* testSensors[3];
 RocketState* state;
 
 void setUp(void) {
     testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
+    testSensors[1] = &fakeAccel;
+    testSensors[2] = &fakeGyro;
 
     fakeBaro.init();
-    fakeIMU.init();
+    fakeAccel.init();
+    fakeGyro.init();
 
-    state = new RocketState(testSensors, 2);
+    state = new RocketState();
+    state->withSensors(testSensors, 3);
+    state->begin();
     state->setGroundLevel(0.0);
 
     setMillis(0);
@@ -32,6 +38,16 @@ void tearDown(void) {
     resetMillis();
 }
 
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    Vector<3> accel = fakeAccel.getAccel();
+    Vector<3> gyro = fakeGyro.getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+}
+
 // ===== APOGEE ESTIMATION DURING BOOST =====
 
 void test_apogee_estimate_during_boost() {
@@ -39,9 +55,10 @@ void test_apogee_estimate_during_boost() {
     state->setFlightStage(FlightStage::BOOST);
 
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 3G upward
+    fakeAccel.set(Vector<3>{0, 0, -30.0}); // 3G upward
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Apogee estimate should be calculated
     double apogee = state->getApogeeEstimate();
@@ -54,9 +71,10 @@ void test_apogee_estimate_during_coast() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(300.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // Free fall
+    fakeAccel.set(Vector<3>{0, 0, -9.81}); // Free fall
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     TEST_ASSERT_TRUE(std::isfinite(apogee));
@@ -68,9 +86,10 @@ void test_apogee_estimate_at_apogee() {
     state->setFlightStage(FlightStage::APOGEE);
 
     fakeBaro.setAltitude(1000.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     // At apogee, velocity should be ~0, so estimate should be close to current altitude
@@ -83,13 +102,15 @@ void test_apogee_estimate_after_apogee() {
 
     // Simulate having reached 1000m
     fakeBaro.setAltitude(1000.0);
-    state->update();
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
+    simulateUpdate();
     setMillis(100);
 
     // Now descending to 800m
     fakeBaro.setAltitude(800.0);
     setMillis(200);
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     // Should be based on max altitude (1000m MSL)
@@ -103,9 +124,10 @@ void test_time_to_apogee_during_coast() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(500.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double timeToApogee = state->getTimeToApogee();
     // Should be finite and non-negative
@@ -118,9 +140,10 @@ void test_time_to_apogee_at_apogee() {
     state->setFlightStage(FlightStage::APOGEE);
 
     fakeBaro.setAltitude(1000.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double timeToApogee = state->getTimeToApogee();
     TEST_ASSERT_EQUAL_DOUBLE(0.0, timeToApogee);
@@ -131,9 +154,10 @@ void test_time_to_apogee_after_apogee() {
     state->setFlightStage(FlightStage::UNDER_MAIN);
 
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double timeToApogee = state->getTimeToApogee();
     TEST_ASSERT_EQUAL_DOUBLE(0.0, timeToApogee);
@@ -144,9 +168,10 @@ void test_time_to_apogee_on_pad() {
     state->setFlightStage(FlightStage::PAD_IDLE);
 
     fakeBaro.setAltitude(0.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double timeToApogee = state->getTimeToApogee();
     TEST_ASSERT_EQUAL_DOUBLE(0.0, timeToApogee);
@@ -159,9 +184,10 @@ void test_apogee_with_zero_velocity() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(500.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Even with zero velocity, should have valid estimate
     double apogee = state->getApogeeEstimate();
@@ -175,9 +201,10 @@ void test_apogee_with_very_low_deceleration() {
 
     fakeBaro.setAltitude(300.0);
     // Very low deceleration - just gravity
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     TEST_ASSERT_TRUE(std::isfinite(apogee));
@@ -189,9 +216,10 @@ void test_apogee_with_high_deceleration() {
 
     fakeBaro.setAltitude(400.0);
     // High deceleration (5G total = 4G drag + 1G gravity)
-    fakeIMU.set(Vector<3>{0, 0, -49.05}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 5G
+    fakeAccel.set(Vector<3>{0, 0, -49.05}); // 5G
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     TEST_ASSERT_TRUE(std::isfinite(apogee));
@@ -207,9 +235,10 @@ void test_apogee_estimate_convergence() {
     // Simulate coasting upward with decreasing velocity
     for (int i = 0; i < 10; i++) {
         fakeBaro.setAltitude(500.0 + i * 50.0); // Ascending
-        fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+        fakeAccel.set(Vector<3>{0, 0, -9.81});
+        fakeGyro.set(Vector<3>{0, 0, 0});
         setMillis(i * 500);
-        state->update();
+        simulateUpdate();
 
         estimates[i] = state->getApogeeEstimate();
     }
@@ -226,9 +255,10 @@ void test_apogee_estimate_negative_altitude() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(50.0); // Below ground level
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     TEST_ASSERT_TRUE(std::isfinite(apogee));
@@ -239,9 +269,10 @@ void test_apogee_with_extreme_altitude() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(100000.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     TEST_ASSERT_TRUE(std::isfinite(apogee));
@@ -257,19 +288,21 @@ void test_apogee_estimate_with_known_trajectory() {
 
     // Start at 100m with high acceleration (boost phase)
     fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 3G during boost
+    fakeAccel.set(Vector<3>{0, 0, -30.0}); // 3G during boost
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
     setMillis(0);
-    state->update();
+    simulateUpdate();
 
     // Transition to coast and simulate ascending
     state->setFlightStage(FlightStage::COAST);
     for (int i = 1; i <= 20; i++) {
         double altitude = 100.0 + i * 20.0; // Linear ascent for simplicity
         fakeBaro.setAltitude(altitude);
-        fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+        fakeAccel.set(Vector<3>{0, 0, -9.81});
+        fakeGyro.set(Vector<3>{0, 0, 0});
         setMillis(i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     double apogee = state->getApogeeEstimate();
@@ -288,9 +321,10 @@ void test_apogee_increases_during_boost() {
 
     for (int i = 0; i < 10; i++) {
         fakeBaro.setAltitude(i * 10.0);
-        fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // Constant thrust
+        fakeAccel.set(Vector<3>{0, 0, -30.0}); // Constant thrust
+        fakeGyro.set(Vector<3>{0, 0, 0});
         setMillis(i * 100);
-        state->update();
+        simulateUpdate();
 
         double currentEstimate = state->getApogeeEstimate();
 
@@ -313,9 +347,10 @@ void test_apogee_stabilizes_near_apogee() {
     // Simulate near apogee
     for (int i = 0; i < 5; i++) {
         fakeBaro.setAltitude(990.0 + i * 2.0); // Slow ascent
-        fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+        fakeAccel.set(Vector<3>{0, 0, -9.81});
+        fakeGyro.set(Vector<3>{0, 0, 0});
         setMillis(i * 500);
-        state->update();
+        simulateUpdate();
 
         estimates[i] = state->getApogeeEstimate();
     }
@@ -341,15 +376,19 @@ void test_apogee_uses_max_altitude_post_apogee() {
     // Ascend to 1000m
     for (int i = 0; i < 20; i++) {
         fakeBaro.setAltitude(i * 50.0);
+        fakeAccel.set(Vector<3>{0, 0, -9.81});
+        fakeGyro.set(Vector<3>{0, 0, 0});
         setMillis(i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     // Reach apogee
     state->setFlightStage(FlightStage::APOGEE);
     fakeBaro.setAltitude(1000.0);
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
     setMillis(2000);
-    state->update();
+    simulateUpdate();
 
     double apogeeAtPeak = state->getApogeeEstimate();
 
@@ -357,7 +396,7 @@ void test_apogee_uses_max_altitude_post_apogee() {
     state->setFlightStage(FlightStage::UNDER_DROGUE);
     fakeBaro.setAltitude(900.0);
     setMillis(2500);
-    state->update();
+    simulateUpdate();
 
     double apogeeOnDescent = state->getApogeeEstimate();
 
@@ -370,14 +409,16 @@ void test_apogee_constant_after_landing() {
     state->setFlightStage(FlightStage::LANDED);
 
     fakeBaro.setAltitude(0.0);
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
     setMillis(0);
-    state->update();
+    simulateUpdate();
 
     double apogee1 = state->getApogeeEstimate();
 
     // Wait some time
     setMillis(10000);
-    state->update();
+    simulateUpdate();
 
     double apogee2 = state->getApogeeEstimate();
 
@@ -389,12 +430,19 @@ void test_apogee_constant_after_landing() {
 
 void test_apogee_with_no_barometer() {
     // Test behavior when barometer is missing
-    Sensor* emptySensors[1];
-    emptySensors[0] = &fakeIMU;
+    Sensor* accelOnlySensors[2];
+    accelOnlySensors[0] = &fakeAccel;
+    accelOnlySensors[1] = &fakeGyro;
 
-    RocketState stateNoBarometer(emptySensors, 1);
+    RocketState stateNoBarometer;
+    stateNoBarometer.withSensors(accelOnlySensors, 2);
+    stateNoBarometer.begin();
     stateNoBarometer.setFlightStage(FlightStage::COAST);
-    stateNoBarometer.update();
+
+    Vector<3> accel = fakeAccel.getAccel();
+    Vector<3> gyro = fakeGyro.getAngVel();
+    stateNoBarometer.updateOrientation(gyro, accel, 0.02);
+    stateNoBarometer.updateMeasurements(Vector<3>(0, 0, 0), 0.0, false, false, -1);
 
     double apogee = stateNoBarometer.getApogeeEstimate();
     TEST_ASSERT_TRUE(std::isfinite(apogee));
@@ -406,9 +454,10 @@ void test_apogee_ground_level_offset() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(1000.0); // 500m AGL
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     double apogee = state->getApogeeEstimate();
     // Apogee should be in MSL
@@ -420,18 +469,20 @@ void test_apogee_updates_every_cycle() {
     state->setFlightStage(FlightStage::COAST);
 
     fakeBaro.setAltitude(500.0);
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
+    fakeGyro.set(Vector<3>{0, 0, 0});
     setMillis(0);
-    state->update();
+    simulateUpdate();
     double apogee1 = state->getApogeeEstimate();
 
     fakeBaro.setAltitude(520.0);
     setMillis(100);
-    state->update();
+    simulateUpdate();
     double apogee2 = state->getApogeeEstimate();
 
     fakeBaro.setAltitude(540.0);
     setMillis(200);
-    state->update();
+    simulateUpdate();
     double apogee3 = state->getApogeeEstimate();
 
     // All should be finite

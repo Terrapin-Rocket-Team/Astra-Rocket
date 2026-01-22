@@ -6,13 +6,15 @@
 #include "../../src/AstraRocketConfig.h"
 
 using namespace astra_rocket;
+using namespace astra;
 
 // ---
 
 // Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeGPS fakeGPS;
-FakeIMU fakeIMU;
+FakeAccel fakeAccel;
+FakeGyro fakeGyro;
 
 // ---
 
@@ -36,7 +38,7 @@ void test_config_default_values() {
     // Test default sensor pointers are null (auto-detect)
     TEST_ASSERT_NULL(config.getBarometer());
     TEST_ASSERT_NULL(config.getGPS());
-    TEST_ASSERT_NULL(config.getIMU());
+    TEST_ASSERT_NULL(config.getAccel());
     TEST_ASSERT_NULL(config.getHighGAccel());
 
     // Test default flight detection thresholds
@@ -76,13 +78,13 @@ void test_config_with_gps() {
     TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
 }
 
-void test_config_with_imu() {
+void test_config_with_accel() {
     AstraRocketConfig config;
 
-    // Set IMU
-    config.withIMU(&fakeIMU);
+    // Set Accel
+    config.withAccel(&fakeAccel);
 
-    TEST_ASSERT_EQUAL_PTR(&fakeIMU, config.getIMU());
+    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
 }
 
 void test_config_with_liftoff_threshold() {
@@ -218,7 +220,7 @@ void test_config_builder_chaining() {
     // Test that methods can be chained
     config.withBarometer(&fakeBaro)
           .withGPS(&fakeGPS)
-          .withIMU(&fakeIMU)
+          .withAccel(&fakeAccel)
           .withLiftoffAccelThreshold(5.0)
           .withFlightLogRate(75.0)
           .withBuzzerFeedback(false);
@@ -226,7 +228,7 @@ void test_config_builder_chaining() {
     // Verify all settings applied
     TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
     TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
-    TEST_ASSERT_EQUAL_PTR(&fakeIMU, config.getIMU());
+    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
     TEST_ASSERT_EQUAL_DOUBLE(5.0, config.getLiftoffAccelThreshold());
     TEST_ASSERT_EQUAL_DOUBLE(75.0, config.getFlightLogRate());
     TEST_ASSERT_FALSE(config.getBuzzerFeedback());
@@ -238,11 +240,11 @@ void test_config_multiple_sensors() {
     // Set all sensors
     config.withBarometer(&fakeBaro)
           .withGPS(&fakeGPS)
-          .withIMU(&fakeIMU);
+          .withAccel(&fakeAccel);
 
     TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
     TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
-    TEST_ASSERT_EQUAL_PTR(&fakeIMU, config.getIMU());
+    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
 }
 
 void test_config_all_flight_thresholds() {
@@ -307,7 +309,7 @@ void test_config_complex_scenario() {
 
     // Configure for a high-power rocket with custom settings
     config.withBarometer(&fakeBaro)
-          .withIMU(&fakeIMU)
+          .withAccel(&fakeAccel)
           .withGPS(&fakeGPS)
           .withLiftoffAccelThreshold(6.0)          // High-thrust motor
           .withLiftoffDetectDuration(50)           // Faster detection
@@ -320,7 +322,7 @@ void test_config_complex_scenario() {
 
     // Verify complex configuration
     TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
-    TEST_ASSERT_EQUAL_PTR(&fakeIMU, config.getIMU());
+    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
     TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
     TEST_ASSERT_EQUAL_DOUBLE(6.0, config.getLiftoffAccelThreshold());
     TEST_ASSERT_EQUAL_UINT32(50, config.getLiftoffDetectDuration());
@@ -343,7 +345,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_config_default_values);
     RUN_TEST(test_config_with_barometer);
     RUN_TEST(test_config_with_gps);
-    RUN_TEST(test_config_with_imu);
+    RUN_TEST(test_config_with_accel);
     RUN_TEST(test_config_with_liftoff_threshold);
     RUN_TEST(test_config_with_liftoff_duration);
     RUN_TEST(test_config_with_burnout_threshold);

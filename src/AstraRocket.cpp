@@ -26,8 +26,12 @@
 
 namespace astra_rocket {
 
+// Static default configuration instance
+AstraRocketConfig AstraRocket::defaultConfig;
+
 AstraRocket::AstraRocket()
-    : astraSys(nullptr),
+    : config(defaultConfig),
+      astraSys(nullptr),
       rocketState(nullptr),
       kalmanFilter(nullptr),
       orientationFilter(nullptr),
@@ -118,12 +122,14 @@ bool AstraRocket::init() {
     orientationFilter = new MahonyAHRS(0.1, 0.0005);
     LOGI("MahonyAHRS orientation filter created");
 
-    // Create rocket state with detected sensors, Kalman filter, and orientation filter
-    rocketState = new RocketState(sensorArray, numSensors, kalmanFilter, orientationFilter);
-    LOGI("RocketState created with %d sensors, Kalman filter, and orientation filter", numSensors);
+    // Create rocket state with Kalman filter and orientation filter
+    // Sensors are managed by Astra's SensorManager, not passed to RocketState
+    rocketState = new RocketState(kalmanFilter, orientationFilter);
+    LOGI("RocketState created with Kalman filter and orientation filter");
 
     // Configure base Astra system
     config.getAstraConfig()->withState(rocketState);
+    config.getAstraConfig()->withSensors(sensorArray, numSensors);  // Sensors managed by Astra's SensorManager
     config.getAstraConfig()->withUpdateRate(50.0);  // 50 Hz default (can be overridden by user config)
     config.getAstraConfig()->withLoggingRate(config.getPreflightLogRate());
     config.getAstraConfig()->withDataLogs(dataSinks, numDataSinks);
@@ -291,7 +297,7 @@ bool AstraRocket::autoDetectSensors() {
     }
 
     // Build sensor array
-    sensorArray = new Sensor*[MAX_SENSORS];
+    sensorArray = new Sensor*[ASTRA_ROCKET_MAX_SENSORS];
     numSensors = 0;
 
     if (barometer) {
@@ -330,11 +336,12 @@ bool AstraRocket::autoDetectSensors() {
 
 void AstraRocket::setupLogging() {
     // Create log sinks
-    dataSinks = new ILogSink*[MAX_LOG_SINKS];
-    eventSinks = new ILogSink*[MAX_LOG_SINKS];
+    dataSinks = new ILogSink*[ASTRA_ROCKET_MAX_LOG_SINKS];
+    eventSinks = new ILogSink*[ASTRA_ROCKET_MAX_LOG_SINKS];
 
-    // USB log for debugging
-    USBLog *usbLog = new USBLog(Serial, 115200, true);
+    // USB log for debugging - use PrintLog which works with any Print object
+    Serial.begin(115200);
+    PrintLog *usbLog = new PrintLog(Serial, true);
     dataSinks[numDataSinks++] = usbLog;
     eventSinks[numEventSinks++] = usbLog;
 

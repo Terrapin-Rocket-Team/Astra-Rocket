@@ -1,6 +1,10 @@
+#ifndef UNIT_TEST_SENSORS_H
+#define UNIT_TEST_SENSORS_H
+
 #include <Sensors/Baro/Barometer.h>
 #include <Sensors/GPS/GPS.h>
-#include <Sensors/IMU/IMU.h>
+#include <Sensors/Accel/Accel.h>
+#include <Sensors/Gyro/Gyro.h>
 #include <Math/Vector.h>
 #include <Math/Quaternion.h>
 
@@ -117,33 +121,56 @@ public:
     }
 };
 
-class FakeIMU : public IMU
+class FakeAccel : public Accel
 {
 public:
-    FakeIMU() : IMU()
+    FakeAccel() : Accel("FakeAccel")
     {
         initialized = true;
-        setName("FakeIMU");
     }
-    ~FakeIMU() {}
+    ~FakeAccel() {}
 
     bool read() override
     {
         return true;
     }
-    void set(Vector<3> acc, Vector<3> gyro, Vector<3> mag)
+
+    void set(Vector<3> accel)
     {
-        measuredAcc = acc;
-        measuredGyro = gyro;
-        measuredMag = mag;
+        acc = accel;
     }
 
     bool init() override
     {
-        measuredAcc = Vector<3>{0, 0, -9.8};
-        measuredGyro = Vector<3>{0, 0, 0};
-        measuredMag = Vector<3>{0, 0, 0};
-        orientation = Quaternion{1, 0, 0, 0};
+        acc = Vector<3>{0, 0, -9.81};
         return initialized;
     }
 };
+
+class FakeGyro : public Gyro
+{
+public:
+    FakeGyro() : Gyro("FakeGyro")
+    {
+        initialized = true;
+    }
+    ~FakeGyro() {}
+
+    bool read() override
+    {
+        return true;
+    }
+
+    void set(Vector<3> gyro)
+    {
+        angVel = gyro;
+    }
+
+    bool init() override
+    {
+        angVel = Vector<3>{0, 0, 0};
+        return initialized;
+    }
+};
+
+#endif // UNIT_TEST_SENSORS_H

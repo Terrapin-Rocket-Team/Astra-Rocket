@@ -23,12 +23,16 @@ class RocketState : public State {
 public:
     /**
      * Constructor
-     * @param sensors Array of sensor pointers
-     * @param numSensors Number of sensors in array
      * @param filter Optional Kalman filter for state estimation
      * @param orientationFilter Optional Mahony AHRS filter for orientation estimation
      */
-    RocketState(Sensor **sensors, int numSensors, Filter *filter = nullptr, MahonyAHRS *orientationFilter = nullptr);
+    RocketState(Filter *filter = nullptr, MahonyAHRS *orientationFilter = nullptr);
+
+    /**
+     * Initialize state estimation
+     * @return true if initialization successful
+     */
+    bool begin() override;
 
     /**
      * Get current flight stage
@@ -91,12 +95,9 @@ public:
      */
     double getTimeInStage() const { return timeInCurrentStage; }
 
-protected:
-    /**
-     * Update state variables - called by State::update()
-     * Implements rocket-specific state estimation logic
-     */
-    void updateVariables() override;
+    // Override split update methods to add rocket-specific logic
+    void updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, double dt) override;
+    void updateMeasurements(const Vector<3> &gpsPos, double baroAlt, bool hasGPS, bool hasBaro, double currentTime = -1) override;
 
 private:
     // Flight stage tracking
