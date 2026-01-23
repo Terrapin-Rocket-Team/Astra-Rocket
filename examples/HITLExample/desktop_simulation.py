@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Desktop HITL Simulation for Astra-Rocket
+Desktop HITL/SITL Simulation for Astra-Rocket
 
 This script simulates a rocket flight and sends sensor data to the
-flight computer over USB Serial at a controlled rate. The FC processes the data
+flight computer at a controlled rate. The FC processes the data
 and sends back TELEM/ packets at its configured logging rate.
 
-Supports two modes:
+Supports two connection modes:
+    1. HITL mode: Connects to FC over USB Serial (hardware-in-the-loop)
+    2. SITL mode: Connects to FC over TCP socket (software-in-the-loop)
+
+Supports two simulation modes:
     1. CSV mode: Load data from an OpenRocket CSV export file
     2. Physics mode: Generate data from simple physics simulation
 
@@ -16,29 +20,148 @@ Protocol:
     3. FC sends TELEM/ at logging rate (configured in FC, typically 10-50Hz)
     4. Sim reads and logs all TELEM/ responses asynchronously
 
-The sim paces itself to avoid overwhelming the FC's serial buffer while maintaining
-accurate simulation timing.
-
 Requirements:
     pip install pyserial numpy matplotlib
 
 Usage:
-    python desktop_simulation.py /dev/ttyACM0 [csv_file]  # Linux/Mac
-    python desktop_simulation.py COM3 [csv_file]          # Windows
+    # HITL mode (serial connection)
+    python desktop_simulation.py --mode hitl --port /dev/ttyACM0 [--csv csv_file]
+    python desktop_simulation.py --mode hitl --port COM3 [--csv csv_file]
 
-    If csv_file is provided, uses CSV data. Otherwise uses physics simulation.
+    # SITL mode (TCP connection)
+    python desktop_simulation.py --mode sitl [--host localhost] [--tcp-port 5555] [--csv csv_file]
+
+    If --csv is provided, uses CSV data. Otherwise uses physics simulation.
 """
 
 import serial
+import socket
 import time
 import sys
 import csv
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from dataclasses import dataclass, field
 from typing import Tuple, List, Optional, Dict
 import math
+
+class ConnectionInterface:
+    """Abstract interface for both Serial and TCP connections"""
+
+    def write(self, data: bytes):
+        """Write data to connection"""
+        raise NotImplementedError
+
+    def read(self, size: int = 1) -> bytes:
+        """Read data from connection"""
+        raise NotImplementedError
+
+    def readline(self) -> bytes:
+        """Read a line from connection"""
+        raise NotImplementedError
+
+    @property
+    def in_waiting(self) -> int:
+        """Number of bytes available to read"""
+        raise NotImplementedError
+
+    def close(self):
+        """Close the connection"""
+        raise NotImplementedError
+
+
+class SerialConnection(ConnectionInterface):
+    """Serial connection wrapper"""
+
+    def __init__(self, port: str, baudrate: int = 115200, timeout: float = 1.0):
+        self.serial = serial.Serial(port, baudrate, timeout=timeout)
+
+    def write(self, data: bytes):
+        self.serial.write(data)
+
+    def read(self, size: int = 1) -> bytes:
+        return self.serial.read(size)
+
+    def readline(self) -> bytes:
+        return self.serial.readline()
+
+    @property
+    def in_waiting(self) -> int:
+        return self.serial.in_waiting
+
+    def close(self):
+        self.serial.close()
+
+
+class TCPConnection(ConnectionInterface):
+    """TCP Server connection wrapper for SITL (Modified to Host/Listen)"""
+
+    def __init__(self, host: str = '0.0.0.0', port: int = 5555, timeout: float = 1.0):
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Bind and Listen
+        self.server_socket.bind((host, port))
+        self.server_socket.listen(1)
+        self.server_socket.settimeout(None) # Wait indefinitely for the FC to wake up
+        
+        print(f"SITL Server started. Listening on {host}:{port}...")
+        print("Waiting for Flight Software to connect...")
+        
+        self.socket, addr = self.server_socket.accept()
+        print(f"Flight Software connected from {addr}")
+        
+        self.socket.setblocking(False)  # Non-blocking mode for simulation loop
+        self._buffer = b''
+
+    def write(self, data: bytes):
+        try:
+            self.socket.sendall(data)
+        except Exception as e:
+            print(f"TCP Write Error: {e}")
+            sys.exit(1)
+
+    def read(self, size: int = 1) -> bytes:
+        try:
+            return self.socket.recv(size)
+        except (BlockingIOError, socket.timeout):
+            return b''
+
+    def readline(self) -> bytes:
+        """Read until newline from the internal buffer"""
+        while b'\n' not in self._buffer:
+            try:
+                chunk = self.socket.recv(1024)
+                if not chunk:
+                    return b''
+                self._buffer += chunk
+            except (BlockingIOError, socket.timeout):
+                break
+
+        if b'\n' in self._buffer:
+            line, self._buffer = self._buffer.split(b'\n', 1)
+            return line + b'\n'
+        return b''
+
+    @property
+    def in_waiting(self) -> int:
+        """Check if data is waiting in the socket or buffer"""
+        if b'\n' in self._buffer:
+            return len(self._buffer)
+        try:
+            # Peek to see if new data is on the wire
+            chunk = self.socket.recv(1024, socket.MSG_PEEK)
+            return len(self._buffer) + len(chunk)
+        except (BlockingIOError, socket.timeout, OSError):
+            return len(self._buffer)
+
+    def close(self):
+        if hasattr(self, 'socket'):
+            self.socket.close()
+        self.server_socket.close()
+
 
 @dataclass
 class SimState:
@@ -419,14 +542,14 @@ class RocketSimulation:
         """Convert state to sensor readings"""
         # Accelerometers measure specific force (all forces EXCEPT gravity)
         # On the pad, they read +1g upward. In free fall, they read 0.
-        force, _ = self.compute_forces(state)
-        # Remove gravity from total force to get specific force
-        specific_force = force - np.array([0, 0, -self.mass * self.g])
-        accel_body = specific_force / self.mass
-
-        # IMPORTANT: Mahony filter expects ENU frame (X=East, Y=North, Z=Up)
-        # Our simulation is already in ENU, so no transformation needed
-        # Just use accel_body directly
+        # If on the pad (before ignition), specific force counteracts gravity to read +1g on Z axis.
+        if state.time < self.ignition_delay:
+            accel_body = np.array([0.0, 0.0, self.g])
+        else:
+            # In flight, specific force is the sum of all non-gravitational forces (thrust, drag).
+            force, _ = self.compute_forces(state)
+            specific_force = force - np.array([0, 0, -self.mass * self.g])
+            accel_body = specific_force / self.mass
 
         # Pressure from altitude (barometric formula)
         # Calculate in Pa, then convert to hPa for the flight computer
@@ -505,34 +628,77 @@ def parse_telem_header(header_line: str) -> dict:
     return column_map
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python desktop_simulation.py <serial_port> [csv_file]")
-        print("Example: python desktop_simulation.py /dev/ttyACM0")
-        print("         python desktop_simulation.py COM3 FMMORK.csv")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='Desktop HITL/SITL Simulation for Astra-Rocket',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # HITL mode with physics simulation
+  python desktop_simulation.py --mode hitl --port COM3
 
-    port = sys.argv[1]
-    csv_file = sys.argv[2] if len(sys.argv) > 2 else None
-    baud = 115200
+  # HITL mode with CSV data
+  python desktop_simulation.py --mode hitl --port /dev/ttyACM0 --csv flight_data.csv
+
+  # SITL mode with physics simulation
+  python desktop_simulation.py --mode sitl
+
+  # SITL mode with custom host/port and CSV data
+  python desktop_simulation.py --mode sitl --host 192.168.1.100 --tcp-port 6666 --csv flight_data.csv
+        """
+    )
+
+    parser.add_argument('--mode', choices=['hitl', 'sitl'], required=True,
+                        help='Connection mode: hitl (USB Serial) or sitl (TCP socket)')
+    parser.add_argument('--port', type=str,
+                        help='Serial port for HITL mode (e.g., COM3, /dev/ttyACM0)')
+    parser.add_argument('--baudrate', type=int, default=115200,
+                        help='Serial baudrate for HITL mode (default: 115200)')
+    parser.add_argument('--host', type=str, default='localhost',
+                        help='Host for SITL mode (default: localhost)')
+    parser.add_argument('--tcp-port', type=int, default=5555,
+                        help='TCP port for SITL mode (default: 5555)')
+    parser.add_argument('--csv', type=str, default=None,
+                        help='CSV file with OpenRocket data (optional, uses physics sim if not provided)')
+
+    args = parser.parse_args()
+
+    # Validate mode-specific arguments
+    if args.mode == 'hitl' and not args.port:
+        parser.error("--port is required for HITL mode")
+
+    csv_file = args.csv
 
     print("===========================================")
-    print("  Astra-Rocket HITL Desktop Simulation")
+    print(f"  Astra-Rocket {args.mode.upper()} Desktop Simulation")
     print("===========================================")
 
     if csv_file:
-        print(f"Mode: CSV playback from '{csv_file}'")
+        print(f"Simulation: CSV playback from '{csv_file}'")
     else:
-        print(f"Mode: Physics simulation")
+        print(f"Simulation: Physics simulation")
 
-    print(f"Connecting to {port} at {baud} baud...")
+    # Create connection based on mode
+    if args.mode == 'hitl':
+        print(f"Connection: HITL mode via {args.port} at {args.baudrate} baud")
+        try:
+            conn = SerialConnection(args.port, args.baudrate, timeout=1.0)
+            time.sleep(2)  # Wait for connection to stabilize
+            print("Connected!")
+        except serial.SerialException as e:
+            print(f"ERROR: Could not open serial port: {e}")
+            sys.exit(1)
+    else:  # SITL mode
+        print(f"Connection: SITL mode via TCP {args.host}:{args.tcp_port}")
+        try:
+            conn = TCPConnection(args.host, args.tcp_port, timeout=1.0)
+            print("Connected!")
+        except (socket.error, ConnectionRefusedError) as e:
+            print(f"ERROR: Could not connect to SITL simulator: {e}")
+            print(f"Make sure the flight software is running and listening on {args.host}:{args.tcp_port}")
+            sys.exit(1)
 
-    try:
-        ser = serial.Serial(port, baud, timeout=1.0)
-        time.sleep(2)  # Wait for connection to stabilize
-        print("Connected!")
-    except serial.SerialException as e:
-        print(f"ERROR: Could not open serial port: {e}")
-        sys.exit(1)
+    # Replace 'ser' with 'conn' throughout - we'll use the connection interface
+    ser = conn
 
     # Column mapping from header (will be populated when we receive header)
     column_map: Optional[Dict[str, int]] = None

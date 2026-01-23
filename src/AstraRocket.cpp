@@ -190,7 +190,6 @@ bool AstraRocket::init() {
     if (config.getBuzzerFeedback()) {
         config.getAstraConfig()->withBBAsync(true);
         config.getAstraConfig()->withBuzzerPin(config.getLEDStatusPin());
-
     }
 
     // Add sensor status and GPS status LEDs to BlinkBuzz if configured
@@ -236,23 +235,39 @@ void AstraRocket::update() {
     if (config.getHITLEnabled()) {
         // HITL mode: wait for incoming sensor data from simulation
         if (Serial.available()) {
+            LOGI("SITL: Serial.available() is true. Reading string...");
             String line = Serial.readStringUntil('\n');
+            LOGI("SITL: Read line: %s", line.c_str());
 
             if (line.startsWith("HITL/")) {
+                LOGI("SITL: Line starts with HITL/. Parsing...");
                 // Parse incoming HITL packet
                 double simTime;
                 if (HITLParser::parseAndInject(line.c_str(), simTime)) {
+                    LOGI("SITL: Parsed successfully. simTime=%f", simTime);
                     // Update with simulation time (NOT millis()!)
                     // Convert simTime from seconds to milliseconds for Astra
                     double simTimeMs = simTime * 1000.0;
                     // This will read sensors from the HITL buffer
                     if (rocketSensorManager) {
+                        LOGI("SITL: Setting sim time on rocketSensorManager");
                         rocketSensorManager->setSimTime((uint32_t)simTimeMs);
                     }
-                    astraSys->update(simTimeMs);
+                    LOGI("SITL: Calling astraSys->update() with simTimeMs=%f", simTimeMs);
+                    try {
+                        astraSys->update(simTimeMs);
+                        LOGI("SITL: astraSys->update() returned successfully");
+                    } catch (const std::exception& e) {
+                        LOGE("SITL: Exception in astraSys->update(): %s", e.what());
+                        return;
+                    } catch (...) {
+                        LOGE("SITL: Unknown exception in astraSys->update()");
+                        return;
+                    }
 
                     // Set ground level from first valid packet (after update)
                     if (!hitlGroundLevelSet && barometer && barometer->isInitialized()) {
+                        LOGI("SITL: Setting ground level.");
                         // Debug: Check what pressure value we're reading
                         HITLSensorBuffer& buffer = HITLSensorBuffer::instance();
                         LOGI("HITL Debug: Buffer pressure = %0.2f hPa", buffer.data.pressure);
@@ -400,16 +415,16 @@ void AstraRocket::setupLogging() {
     dataSinks[numDataSinks++] = usbLog;
     eventSinks[numEventSinks++] = usbLog;
 
-    RadioLog *rad = new RadioLog(*config.getRadioSerial());
-    dataSinks[numDataSinks++] = rad;
+    // RadioLog *rad = new RadioLog(*config.getRadioSerial());
+    // dataSinks[numDataSinks++] = rad;
 
     // SD card log for data recording
-    FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
-    FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
+    // FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
+    // FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
 
 
-    eventSinks[numEventSinks++] = sdEventLog;
-    dataSinks[numDataSinks++] = sdDataLog;
+    // eventSinks[numEventSinks++] = sdEventLog;
+    // dataSinks[numDataSinks++] = sdDataLog;
 
     // Configure EventLogger
     EventLogger::configure(eventSinks, numEventSinks);
@@ -499,10 +514,10 @@ void AstraRocket::updateStatusIndicators() {
 
     // For now, just keep LED on during flight
     if (stage != PAD_IDLE && stage != LANDED) {
-        digitalWrite(config.getLEDStatusPin(), HIGH);
+        //digitalWrite(config.getLEDStatusPin(), HIGH);
     } else {
         // Blink slowly on pad/landed
-        digitalWrite(config.getLEDStatusPin(), (millis() / 1000) % 2);
+       // digitalWrite(config.getLEDStatusPin(), (millis() / 1000) % 2);
     }
 
     // === Sensor Status LED ===
@@ -520,12 +535,12 @@ void AstraRocket::updateStatusIndicators() {
 
         if (allSensorsGood) {
             // All sensors good - solid green (on)
-            bb.on(config.getSensorStatusLEDPin());
+            //bb.on(config.getSensorStatusLEDPin());
         } else {
             // Some sensor failed - blink pattern (2 quick blinks)
             static unsigned long lastSensorUpdate = 0;
             if (millis() - lastSensorUpdate > 2000) {
-                bb.aonoff(config.getSensorStatusLEDPin(), 100, 2, 100);
+                //bb.aonoff(config.getSensorStatusLEDPin(), 100, 2, 100);
                 lastSensorUpdate = millis();
             }
         }
@@ -538,22 +553,22 @@ void AstraRocket::updateStatusIndicators() {
             if (gps->isInitialized()) {
                 if (gps->getHasFix()) {
                     // GPS has fix - solid on (extra good)
-                    bb.on(config.getGPSStatusLEDPin());
+                    // bb.on(config.getGPSStatusLEDPin());
                 } else {
                     // GPS initialized but no fix - slow blink pattern
                     static unsigned long lastGPSUpdate = 0;
                     if (millis() - lastGPSUpdate > 1000) {
-                        bb.aonoff(config.getGPSStatusLEDPin(), 200);
+                        // bb.aonoff(config.getGPSStatusLEDPin(), 200);
                         lastGPSUpdate = millis();
                     }
                 }
             } else {
                 // GPS not initialized - off
-                bb.off(config.getGPSStatusLEDPin());
+                //bb.off(config.getGPSStatusLEDPin());
             }
         } else {
             // No GPS present - off
-            bb.off(config.getGPSStatusLEDPin());
+            //bb.off(config.getGPSStatusLEDPin());
         }
     }
 }

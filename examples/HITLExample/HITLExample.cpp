@@ -24,6 +24,12 @@ AstraRocket* rocket = nullptr;
 void setup() {
     // Initialize Serial for USB communication
     Serial.begin(115200);
+    if(Serial.connectSITL("localhost", 5555)){
+        Serial.println("Connected to SITL");
+    }
+    else{
+        Serial.println("Failed to connect to SITL");
+    }
 
     // Wait for Serial connection (optional, comment out for flight)
     while (!Serial && millis() < 5000) {
@@ -37,13 +43,14 @@ void setup() {
     Serial.println();
 
     // Configure rocket for HITL mode
-    AstraRocketConfig config;
-    config//.withHITL(true)                      // Enable HITL mode
+    // NOTE: config must be static because AstraRocket stores a reference to it
+    static AstraRocketConfig config;
+    config.withHITL(true)                      // Enable HITL mode
           .withUpdateRate(50.0)                 // 50 Hz update rate
           .withPreflightLogRate(50.0)           // Log at full rate in HITL
           .withFlightLogRate(50.0)
-          .withPostflightLogRate(50.0)
-          .withBuzzerFeedback(true);            // Keep LEDs/buzzer active (it's HW-in-the-loop!)
+          .withPostflightLogRate(50.0);
+          //.withBuzzerFeedback(true);            // Keep LEDs/buzzer active (it's HW-in-the-loop!)
 
     // Create rocket with HITL configuration
     rocket = new AstraRocket(config);
@@ -75,3 +82,7 @@ void loop() {
     // 3. Updates state estimation with simulation time
     // 4. Outputs TELEM/ packet automatically via DataLogger
 }
+
+#ifdef NATIVE
+#include <NativeTestHelper.h>
+#endif

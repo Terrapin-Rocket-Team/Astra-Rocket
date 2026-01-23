@@ -42,10 +42,10 @@ AstraRocketConfig::AstraRocketConfig()
       flightLogRate(50.0),
       postflightLogRate(1.0),
       flashBackup(false),
-      buzzerFeedback(true),
-      ledStatusPin(LED_BUILTIN),
-      sensorStatusLEDPin(-1),
-      gpsStatusLEDPin(-1),
+      buzzerFeedback(false),
+      ledStatusPin(-15),
+      sensorStatusLEDPin(-155),
+      gpsStatusLEDPin(-1555),
       radioSerial(&Serial2),
       hitlEnabled(false)
 {
