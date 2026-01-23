@@ -1,10 +1,11 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 
 // include other headers you need to test here
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 
 using namespace astra_rocket;
 
@@ -13,7 +14,7 @@ using namespace astra_rocket;
 // Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-Sensor* testSensors[2];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 // ---
@@ -21,16 +22,20 @@ RocketState* state;
 // These two functions are called before and after each test function, and are required in unity, even if empty.
 void setUp(void)
 {
-    // set stuff up before each test here, if needed
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
-
     // Initialize sensors
     fakeBaro.init();
     fakeIMU.init();
 
+    // Set up sensor manager
+    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
+    sensorManager.withGyro(fakeIMU.getGyroSensor());
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
     // Create new RocketState for each test
-    state = new RocketState(testSensors, 2);
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
     state->setGroundLevel(0.0); // Sea level for simplicity
 
     // Reset time tracking
@@ -43,6 +48,18 @@ void tearDown(void)
     delete state;
     state = nullptr;
     resetMillis();  // Reset fake time for next test
+}
+
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
+    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
 }
 // ---
 
@@ -60,7 +77,7 @@ void test_pad_idle_to_boost_transition() {
     // Stabilize on pad (10 updates at 20ms intervals)
     for (int i = 0; i < 10; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Should still be on pad
@@ -72,7 +89,7 @@ void test_pad_idle_to_boost_transition() {
     // Update through liftoff detection period (150ms = 8 more updates)
     for (int i = 10; i < 18; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Should detect liftoff by now (or stay on pad - filter-dependent)
@@ -90,14 +107,14 @@ void test_boost_to_coast_transition() {
     fakeBaro.set(101325.0, 20.0);
     fakeIMU.set(Vector<3>{0, 0, -10.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 1.0G
 
-    state->update();
+    simulateUpdate();
 
     // Should still be in boost (needs sustained low acceleration)
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
 
     // Advance time past burnout detection duration (200ms)
     setMillis(1250);
-    state->update();
+    simulateUpdate();
 
     // Now should detect burnout
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
@@ -113,7 +130,7 @@ void test_coast_to_apogee_transition() {
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
     // Update state
-    state->update();
+    simulateUpdate();
 
     // The state may transition to APOGEE immediately if velocity is low
     // Accept either COAST or APOGEE as valid outcomes
@@ -130,7 +147,7 @@ void test_apogee_to_expecting_drogue_transition() {
     fakeBaro.set(95000.0, 10.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Since we're at apogee and starting to descend, should transition
     // Note: This depends on the state's internal velocity calculation
@@ -149,7 +166,7 @@ void test_expecting_drogue_to_under_drogue_transition() {
     fakeBaro.set(95000.0, 10.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Verify we're still in expecting drogue or transitioned
     TEST_ASSERT_TRUE(state->getFlightStage() == FlightStage::EXPECTING_DROGUE ||
@@ -165,7 +182,7 @@ void test_under_drogue_to_expecting_main_transition() {
     fakeBaro.set(100700.0, 15.0); // ~300m altitude
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Should transition to expecting main when below 400m
     // Note: Depends on proper altitude calculation
@@ -183,7 +200,7 @@ void test_expecting_main_to_under_main_transition() {
     fakeBaro.set(100700.0, 15.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Verify state
     TEST_ASSERT_TRUE(state->getFlightStage() == FlightStage::EXPECTING_MAIN ||
@@ -199,14 +216,14 @@ void test_under_main_to_landed_transition() {
     fakeBaro.set(101325.0, 20.0); // Back at ground level
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Should still be under main (needs sustained low velocity)
     TEST_ASSERT_EQUAL(FlightStage::UNDER_MAIN, state->getFlightStage());
 
     // Advance time past landing detection duration (3000ms)
     setMillis(33500);
-    state->update();
+    simulateUpdate();
 
     // Verify still under main or landed
     // Note: Actual transition depends on velocity calculation
@@ -223,7 +240,7 @@ void test_no_transition_from_landed() {
     fakeBaro.set(101325.0, 20.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Should remain landed (terminal state)
     TEST_ASSERT_EQUAL(FlightStage::LANDED, state->getFlightStage());
@@ -247,7 +264,9 @@ void test_manual_stage_setting() {
 void test_time_in_stage_tracking() {
     // Start fresh - create a new state to reset counters
     delete state;
-    state = new RocketState(testSensors, 2);
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
     state->setGroundLevel(0.0);
 
     resetMillis();
@@ -258,7 +277,7 @@ void test_time_in_stage_tracking() {
 
     // Advance a bit and update - should be near 0
     setMillis(100);  // Small advancement
-    state->update();
+    simulateUpdate();
     double initialTime = state->getTimeInStage();
     printf("Initial time in stage: %.3f seconds (millis=%llu)\n", initialTime, millis());
     TEST_ASSERT_TRUE(initialTime >= 0.0 && initialTime < 0.2);
@@ -266,7 +285,7 @@ void test_time_in_stage_tracking() {
     // Advance time by 2 more seconds in small steps to ensure update happens
     for (int i = 1; i <= 25; i++) {
         setMillis(100 + i * 80);  // 180, 260, 340, ..., 2100
-        state->update();
+        simulateUpdate();
     }
 
     // Should be approximately 2.0+ seconds

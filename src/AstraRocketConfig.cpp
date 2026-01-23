@@ -22,6 +22,8 @@ AstraRocketConfig::AstraRocketConfig()
       storageBackend(StorageBackend::SD_CARD),
       #elif defined(ENV_ESP)
       storageBackend(StorageBackend::SD_CARD),
+      #elif defined(NATIVE)
+      storageBackend(StorageBackend::NONE),
       #else
       #error "Unsupported platform: No storage backend default defined"
       #endif

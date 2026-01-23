@@ -1,25 +1,30 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 
 using namespace astra_rocket;
 
 // Test fixtures
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-Sensor* testSensors[2];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 void setUp(void) {
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
-
     fakeBaro.init();
     fakeIMU.init();
 
-    state = new RocketState(testSensors, 2);
+    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
+    sensorManager.withGyro(fakeIMU.getGyroSensor());
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
     state->setGroundLevel(0.0);
 
     setMillis(0);
@@ -29,6 +34,18 @@ void tearDown(void) {
     delete state;
     state = nullptr;
     resetMillis();
+}
+
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
+    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
 }
 
 // ===== LIFTOFF DETECTION EDGE CASES =====
@@ -41,7 +58,7 @@ void test_false_liftoff_brief_spike() {
     // Stabilize on pad
     for (int i = 0; i < 10; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, state->getFlightStage());
 
@@ -49,13 +66,13 @@ void test_false_liftoff_brief_spike() {
     fakeIMU.set(Vector<3>{0, 0, -35.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 3.5G
     for (int i = 10; i < 14; i++) {  // 4 updates * 20ms = 80ms
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Drop back to pad acceleration
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     setMillis(300);
-    state->update();
+    simulateUpdate();
 
     // Should still be on pad - spike was too brief
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, state->getFlightStage());
@@ -68,7 +85,7 @@ void test_liftoff_at_threshold_boundary() {
 
     for (int i = 0; i < 5; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Apply exactly 3.0G (threshold value)
@@ -77,7 +94,7 @@ void test_liftoff_at_threshold_boundary() {
     // Sustain for > 100ms
     for (int i = 5; i < 15; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Should detect liftoff at threshold
@@ -92,7 +109,7 @@ void test_no_liftoff_below_threshold() {
 
     for (int i = 0; i < 5; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Apply 2.9G (just below threshold)
@@ -101,7 +118,7 @@ void test_no_liftoff_below_threshold() {
     // Sustain for well over 100ms
     for (int i = 5; i < 20; i++) {
         setMillis(i * 20);
-        state->update();
+        simulateUpdate();
     }
 
     // Should NOT detect liftoff
@@ -114,19 +131,19 @@ void test_liftoff_sustained_detection_timing() {
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
     setMillis(0);
-    state->update();
+    simulateUpdate();
 
     // Apply 4.0G
     fakeIMU.set(Vector<3>{0, 0, -39.24}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
     // Update at 50ms - should not trigger yet
     setMillis(50);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, state->getFlightStage());
 
     // Update at 101ms - should trigger
     setMillis(101);
-    state->update();
+    simulateUpdate();
     FlightStage stage = state->getFlightStage();
     // Allow either state due to filter behavior
     TEST_ASSERT_TRUE(stage == FlightStage::BOOST || stage == FlightStage::PAD_IDLE);
@@ -141,11 +158,11 @@ void test_burnout_at_threshold_boundary() {
 
     // Set exactly 1.5G
     fakeIMU.set(Vector<3>{0, 0, -14.715}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Sustain for > 200ms
     setMillis(1250);
-    state->update();
+    simulateUpdate();
 
     // Should detect burnout
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
@@ -157,10 +174,10 @@ void test_no_burnout_above_threshold() {
     setMillis(1000);
 
     fakeIMU.set(Vector<3>{0, 0, -15.7}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 1.6G
-    state->update();
+    simulateUpdate();
 
     setMillis(1500);
-    state->update();
+    simulateUpdate();
 
     // Should still be in boost
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
@@ -172,17 +189,17 @@ void test_burnout_sustained_detection_timing() {
     setMillis(1000);
 
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // 1.0G
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
 
     // At 150ms - should not trigger
     setMillis(1150);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
 
     // At 201ms - should trigger
     setMillis(1201);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 }
 
@@ -191,27 +208,27 @@ void test_multiple_motor_burns() {
     state->setFlightStage(FlightStage::BOOST);
     setMillis(1000);
     fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // High G during boost
-    state->update();
+    simulateUpdate();
 
     // First motor burnout
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update(); // Start the low accel timer
+    simulateUpdate(); // Start the low accel timer
     setMillis(1250);
-    state->update(); // Trigger burnout after > 200ms
+    simulateUpdate(); // Trigger burnout after > 200ms
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 
     // Second motor ignition (would need manual override in real system)
     state->setFlightStage(FlightStage::BOOST);
     fakeIMU.set(Vector<3>{0, 0, -35.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     setMillis(2000);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
 
     // Second burnout
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update(); // Start the timer
+    simulateUpdate(); // Start the timer
     setMillis(2250);
-    state->update(); // Trigger burnout
+    simulateUpdate(); // Trigger burnout
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 }
 
@@ -227,7 +244,7 @@ void test_apogee_at_velocity_threshold() {
 
     // This test depends on velocity calculation from State class
     // For a more robust test, we'd need to simulate velocity history
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::COAST || stage == FlightStage::APOGEE);
@@ -241,7 +258,7 @@ void test_apogee_very_low_velocity() {
     fakeBaro.setAltitude(1000.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Should transition to apogee
     FlightStage stage = state->getFlightStage();
@@ -259,7 +276,7 @@ void test_drogue_detection_at_min_boundary() {
     fakeBaro.setAltitude(400.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::EXPECTING_DROGUE ||
@@ -274,7 +291,7 @@ void test_drogue_detection_at_max_boundary() {
     fakeBaro.setAltitude(350.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::EXPECTING_DROGUE ||
@@ -294,7 +311,7 @@ void test_ballistic_descent_no_drogue() {
     for (int i = 0; i < 10; i++) {
         setMillis(10000 + i * 100);
         fakeBaro.setAltitude(300.0 - i * 5.0); // 50 m/s descent
-        state->update();
+        simulateUpdate();
     }
 
     // Should still be expecting drogue if descent is too fast
@@ -311,13 +328,13 @@ void test_main_deployment_altitude_boundary() {
 
     // At 401m - should not trigger
     fakeBaro.setAltitude(401.0);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::UNDER_DROGUE, state->getFlightStage());
 
     // At 399m - should trigger
     fakeBaro.setAltitude(399.0);
     setMillis(15100);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::EXPECTING_MAIN, state->getFlightStage());
 }
 
@@ -329,7 +346,7 @@ void test_main_detection_at_min_boundary() {
     fakeBaro.setAltitude(50.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::EXPECTING_MAIN ||
@@ -344,7 +361,7 @@ void test_main_detection_at_max_boundary() {
     fakeBaro.setAltitude(50.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::EXPECTING_MAIN ||
@@ -360,16 +377,16 @@ void test_landing_detection_timing() {
 
     fakeBaro.setAltitude(0.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // At 2999ms - should not trigger
     setMillis(32999);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::UNDER_MAIN, state->getFlightStage());
 
     // At 3001ms - should trigger
     setMillis(33001);
-    state->update();
+    simulateUpdate();
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::UNDER_MAIN || stage == FlightStage::LANDED);
 }
@@ -382,24 +399,24 @@ void test_landing_bouncing() {
     // Touch ground
     fakeBaro.setAltitude(0.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Wait 1 second
     setMillis(31000);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::UNDER_MAIN, state->getFlightStage());
 
     // Bounce up briefly
     fakeBaro.setAltitude(2.0);
     fakeIMU.set(Vector<3>{0, 0, -15.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     setMillis(31500);
-    state->update();
+    simulateUpdate();
 
     // Back down
     fakeBaro.setAltitude(0.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     setMillis(32000);
-    state->update();
+    simulateUpdate();
 
     // Should still be under main - bounce reset the timer
     TEST_ASSERT_EQUAL(FlightStage::UNDER_MAIN, state->getFlightStage());
@@ -413,12 +430,12 @@ void test_landing_at_velocity_threshold() {
     fakeBaro.setAltitude(1.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::UNDER_MAIN, state->getFlightStage());
 
     // Wait 3+ seconds
     setMillis(33500);
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::UNDER_MAIN || stage == FlightStage::LANDED);
@@ -437,7 +454,7 @@ void test_landed_is_terminal() {
 
     for (int i = 0; i < 100; i++) {
         setMillis(40000 + i * 100);
-        state->update();
+        simulateUpdate();
     }
 
     // Should always remain landed
@@ -459,7 +476,7 @@ void test_rapid_acceleration_changes() {
             fakeIMU.set(Vector<3>{0, 0, -10.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0}); // Low
         }
         setMillis(1000 + i * 50);
-        state->update();
+        simulateUpdate();
     }
 
     // Should still be in boost - fluctuations shouldn't cause false burnout

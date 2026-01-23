@@ -1,10 +1,11 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 
 // include other headers you need to test here
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 
 using namespace astra_rocket;
 
@@ -13,20 +14,24 @@ using namespace astra_rocket;
 // Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-Sensor* testSensors[2];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 // ---
 
 void setUp(void)
 {
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
-
     fakeBaro.init();
     fakeIMU.init();
 
-    state = new RocketState(testSensors, 2);
+    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
+    sensorManager.withGyro(fakeIMU.getGyroSensor());
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
 
     setMillis(0);
 }
@@ -37,6 +42,19 @@ void tearDown(void)
     state = nullptr;
     resetMillis();
 }
+
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
+    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+}
+
 // ---
 
 void test_fake_barometer_altitude() {
@@ -54,13 +72,13 @@ void test_rocket_state_reads_barometer() {
     fakeBaro.setAltitude(100.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
 
-    state->update();
+    simulateUpdate();
 
     // Now set ground level
     state->setGroundLevel(100.0);
 
     // Update state again to recalculate AGL with new ground level
-    state->update();
+    simulateUpdate();
 
     double aglAfter = state->getAltitudeAGL();
 

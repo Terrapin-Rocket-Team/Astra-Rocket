@@ -1,8 +1,9 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 #include <cmath>
 
 using namespace astra_rocket;
@@ -10,17 +11,21 @@ using namespace astra_rocket;
 // Test fixtures
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-Sensor* testSensors[2];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 void setUp(void) {
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
-
     fakeBaro.init();
     fakeIMU.init();
 
-    state = new RocketState(testSensors, 2);
+    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
+    sensorManager.withGyro(fakeIMU.getGyroSensor());
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
     state->setGroundLevel(0.0);
 
     setMillis(0);
@@ -30,6 +35,18 @@ void tearDown(void) {
     delete state;
     state = nullptr;
     resetMillis();
+}
+
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
+    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
 }
 
 // ===== HELPER FUNCTIONS FOR FLIGHT SIMULATION =====
@@ -44,7 +61,7 @@ void simulateNominalFlight() {
     for (int i = 0; i < 10; i++) {
         t = i * 100;
         setMillis(t);
-        state->update();
+        simulateUpdate();
     }
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, state->getFlightStage());
 
@@ -60,7 +77,7 @@ void simulateNominalFlight() {
 
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -accel_g * 9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // COAST (5s-12s, 500m-1500m)
@@ -71,7 +88,7 @@ void simulateNominalFlight() {
         altitude += (70 - i) * 0.3; // Decreasing upward velocity
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // APOGEE (12s-12.5s, ~1500m)
@@ -80,7 +97,7 @@ void simulateNominalFlight() {
         setMillis(t);
         fakeBaro.setAltitude(1500.0);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // DESCENT - EXPECTING DROGUE (12.5s-13s)
@@ -90,7 +107,7 @@ void simulateNominalFlight() {
         altitude = 1500.0 - i * 2.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // UNDER DROGUE (13s-35s, 1490m-450m, 20 m/s descent)
@@ -102,7 +119,7 @@ void simulateNominalFlight() {
         if (altitude < 450.0) altitude = 450.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // EXPECTING MAIN (crosses 400m)
@@ -112,7 +129,7 @@ void simulateNominalFlight() {
         altitude = 400.0 - i * 2.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // UNDER MAIN (36s-100s, 380m-0m, 5 m/s descent)
@@ -124,7 +141,7 @@ void simulateNominalFlight() {
         if (altitude < 0.0) altitude = 0.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // LANDED (wait 3+ seconds at ground)
@@ -133,7 +150,7 @@ void simulateNominalFlight() {
         setMillis(t);
         fakeBaro.setAltitude(0.0);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 }
 
@@ -160,7 +177,7 @@ void test_low_altitude_flight() {
     // Pad
     fakeBaro.setAltitude(0.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Short boost to 100m
     for (int i = 0; i < 20; i++) {
@@ -168,7 +185,7 @@ void test_low_altitude_flight() {
         setMillis(t);
         fakeBaro.setAltitude(i * 5.0);
         fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Coast to 200m
@@ -177,14 +194,14 @@ void test_low_altitude_flight() {
         setMillis(t);
         fakeBaro.setAltitude(100.0 + i * 5.0);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Apogee at 200m
     state->setFlightStage(FlightStage::APOGEE);
     setMillis(5000);
     fakeBaro.setAltitude(200.0);
-    state->update();
+    simulateUpdate();
 
     // Quick descent (no drogue needed - direct to main or drogue-only)
     for (int i = 0; i < 40; i++) {
@@ -192,7 +209,7 @@ void test_low_altitude_flight() {
         setMillis(t);
         fakeBaro.setAltitude(200.0 - i * 5.0);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Verify we reach a descent stage
@@ -211,7 +228,7 @@ void test_high_altitude_flight() {
     // Pad
     fakeBaro.setAltitude(0.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Long boost to 2000m
     double altitude = 0.0;
@@ -221,7 +238,7 @@ void test_high_altitude_flight() {
         altitude += 20.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -50.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Long coast to 6000m
@@ -232,7 +249,7 @@ void test_high_altitude_flight() {
         if (altitude > 6000.0) altitude = 6000.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Verify high altitude was reached
@@ -247,7 +264,7 @@ void test_failed_drogue_deployment() {
     state->setFlightStage(FlightStage::APOGEE);
     setMillis(10000);
     fakeBaro.setAltitude(1000.0);
-    state->update();
+    simulateUpdate();
 
     // Rapid descent (ballistic, > 40 m/s)
     double altitude = 1000.0;
@@ -258,7 +275,7 @@ void test_failed_drogue_deployment() {
         if (altitude < 400.0) altitude = 400.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should remain in EXPECTING_DROGUE (or eventually EXPECTING_MAIN at altitude)
@@ -285,7 +302,7 @@ void test_failed_main_deployment() {
         if (altitude < 100.0) altitude = 100.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should transition to EXPECTING_MAIN but not UNDER_MAIN
@@ -303,7 +320,7 @@ void test_dual_deploy_successful() {
     state->setFlightStage(FlightStage::APOGEE);
     setMillis(10000);
     fakeBaro.setAltitude(1000.0);
-    state->update();
+    simulateUpdate();
 
     // Drogue descent to 450m
     double altitude = 1000.0;
@@ -313,7 +330,7 @@ void test_dual_deploy_successful() {
         altitude -= 2.0; // 20 m/s
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should be under drogue
@@ -325,7 +342,7 @@ void test_dual_deploy_successful() {
         setMillis(t);
         altitude -= 2.0;
         fakeBaro.setAltitude(altitude);
-        state->update();
+        simulateUpdate();
     }
 
     // Should expect main
@@ -341,7 +358,7 @@ void test_dual_deploy_successful() {
         setMillis(t);
         altitude -= 0.5; // 5 m/s
         fakeBaro.setAltitude(altitude);
-        state->update();
+        simulateUpdate();
     }
 
     // Should detect main deployment
@@ -358,7 +375,7 @@ void test_single_deploy_main_only() {
     state->setFlightStage(FlightStage::APOGEE);
     setMillis(5000);
     fakeBaro.setAltitude(300.0);
-    state->update();
+    simulateUpdate();
 
     // Direct to main deployment (below 400m)
     double altitude = 300.0;
@@ -368,7 +385,7 @@ void test_single_deploy_main_only() {
         altitude -= 0.5; // 5 m/s (main immediately)
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should be in a descent stage
@@ -388,7 +405,7 @@ void test_motor_cato() {
     // Normal boost start
     fakeBaro.setAltitude(0.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     state->setFlightStage(FlightStage::BOOST);
     for (int i = 0; i < 10; i++) {
@@ -396,7 +413,7 @@ void test_motor_cato() {
         setMillis(t);
         fakeBaro.setAltitude(i * 5.0);
         fakeIMU.set(Vector<3>{0, 0, -40.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Sudden stop (motor CATO)
@@ -404,11 +421,11 @@ void test_motor_cato() {
     setMillis(t);
     fakeBaro.setAltitude(50.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Should transition to coast
     setMillis(2250);
-    state->update();
+    simulateUpdate();
 
     FlightStage stage = state->getFlightStage();
     TEST_ASSERT_TRUE(stage == FlightStage::BOOST || stage == FlightStage::COAST);
@@ -429,7 +446,7 @@ void test_lawn_dart() {
         altitude -= 6.0; // 60 m/s ballistic
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should stay in expecting drogue (no valid deployment)
@@ -455,7 +472,7 @@ void test_windy_landing() {
 
         // Add horizontal acceleration (wind)
         fakeIMU.set(Vector<3>{5.0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Touchdown
@@ -464,7 +481,7 @@ void test_windy_landing() {
         setMillis(t);
         fakeBaro.setAltitude(0.0);
         fakeIMU.set(Vector<3>{2.0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should eventually land
@@ -484,7 +501,7 @@ void test_tree_landing() {
         if (altitude < 10.0) altitude = 10.0;
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Stuck at 10m
@@ -492,7 +509,7 @@ void test_tree_landing() {
         setMillis(38000 + i * 100);
         fakeBaro.setAltitude(10.0);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should detect landing (velocity ~0 sustained)

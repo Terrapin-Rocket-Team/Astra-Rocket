@@ -1,8 +1,9 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 #include <cmath>
 
 using namespace astra_rocket;
@@ -12,20 +13,21 @@ using namespace astra;
 FakeBarometer fakeBaro;
 FakeAccel fakeAccel;
 FakeGyro fakeGyro;
-Sensor* testSensors[3];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 void setUp(void) {
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeAccel;
-    testSensors[2] = &fakeGyro;
-
     fakeBaro.init();
     fakeAccel.init();
     fakeGyro.init();
 
+    sensorManager.withLowGAccel(&fakeAccel);
+    sensorManager.withGyro(&fakeGyro);
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
     state = new RocketState();
-    state->withSensors(testSensors, 3);
+    state->withSensorManager(&sensorManager);
     state->begin();
     state->setGroundLevel(0.0);
 
@@ -430,12 +432,13 @@ void test_apogee_constant_after_landing() {
 
 void test_apogee_with_no_barometer() {
     // Test behavior when barometer is missing
-    Sensor* accelOnlySensors[2];
-    accelOnlySensors[0] = &fakeAccel;
-    accelOnlySensors[1] = &fakeGyro;
+    RocketSensorManager sensorManagerNoBaro;
+    sensorManagerNoBaro.withLowGAccel(&fakeAccel);
+    sensorManagerNoBaro.withGyro(&fakeGyro);
+    sensorManagerNoBaro.begin();
 
     RocketState stateNoBarometer;
-    stateNoBarometer.withSensors(accelOnlySensors, 2);
+    stateNoBarometer.withSensorManager(&sensorManagerNoBaro);
     stateNoBarometer.begin();
     stateNoBarometer.setFlightStage(FlightStage::COAST);
 

@@ -59,7 +59,7 @@ void RocketState::setFlightStage(FlightStage stage) {
     if (stage != currentStage) {
         previousStage = currentStage;
         currentStage = stage;
-        stageStartTime = millis();
+        stageStartTime = (unsigned long)(currentTime * 1000.0);
         timeInCurrentStage = 0;
         LOGI("Flight stage transition: %s -> %s",
              flightStageToString(previousStage),
@@ -72,7 +72,7 @@ void RocketState::updateOrientation(const Vector<3> &gyro, const Vector<3> &acce
     State::updateOrientation(gyro, accel, dt);
 
     // Update time in current stage
-    unsigned long currentMillis = millis();
+    unsigned long currentMillis = (unsigned long)(currentTime * 1000.0);
     timeInCurrentStage = (currentMillis - stageStartTime) / 1000.0;
 
     // Calculate rocket-specific derived values that depend on orientation
@@ -199,7 +199,7 @@ void RocketState::updateMaxValues() {
 }
 
 void RocketState::detectFlightStage() {
-    unsigned long now = millis();
+    unsigned long now = (unsigned long)(currentTime * 1000.0);
     FlightStage newStage = currentStage;
     Accel *accel_sensor = nullptr;
     if (sensorManager) {

@@ -1,10 +1,11 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 
 // include other headers you need to test here
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 
 using namespace astra_rocket;
 
@@ -13,7 +14,7 @@ using namespace astra_rocket;
 // Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-Sensor* testSensors[2];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 // ---
@@ -21,16 +22,20 @@ RocketState* state;
 // These two functions are called before and after each test function, and are required in unity, even if empty.
 void setUp(void)
 {
-    // set stuff up before each test here, if needed
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
-
     // Initialize sensors
     fakeBaro.init();
     fakeIMU.init();
 
+    // Set up sensor manager
+    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
+    sensorManager.withGyro(fakeIMU.getGyroSensor());
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
     // Create new RocketState for each test
-    state = new RocketState(testSensors, 2);
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
 
     // Reset time
     setMillis(0);
@@ -43,6 +48,19 @@ void tearDown(void)
     state = nullptr;
     resetMillis();  // Reset fake time for next test
 }
+
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
+    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+}
+
 // ---
 
 // Test functions must be void and take no arguments, put them here
@@ -51,11 +69,11 @@ void test_ground_level_initialization() {
     // Set barometer to 100m MSL
     fakeBaro.setAltitude(100.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Set ground level to current altitude
     state->setGroundLevel(100.0);
-    state->update();  // Update to recalculate AGL
+    simulateUpdate();  // Update to recalculate AGL
 
     // AGL should be approximately 0 when at ground level
     double agl = state->getAltitudeAGL();
@@ -69,10 +87,11 @@ void test_altitude_agl_calculation() {
 
     // Set ground level at sea level
     state->setGroundLevel(0.0);
-    state->update();
+    simulateUpdate();
 
     // AGL should be approximately 500m
     double agl = state->getAltitudeAGL();
+    printf("AGL: %.2f m (expected 490-510)\n", agl);
     TEST_ASSERT_TRUE(agl >= 490.0 && agl <= 510.0); // Allow 10m margin
 }
 
@@ -83,7 +102,7 @@ void test_altitude_agl_with_elevated_ground_level() {
 
     // Set ground level at 1000m MSL
     state->setGroundLevel(1000.0);
-    state->update();
+    simulateUpdate();
 
     // AGL should be approximately 500m
     double agl = state->getAltitudeAGL();
@@ -97,7 +116,7 @@ void test_vertical_velocity_calculation() {
     // Set initial altitude
     fakeBaro.set(101325.0, 20.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // The vertical velocity is calculated from the state's internal filter
     // For this test, we just verify the getter works
@@ -111,7 +130,7 @@ void test_vertical_acceleration_calculation() {
     // Set high acceleration (3G upward = -30 m/s^2 in IMU z-axis)
     fakeBaro.set(101325.0, 20.0);
     fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // Vertical acceleration should be approximately 3G
     // Note: Actual value depends on state's acceleration calculation
@@ -127,21 +146,21 @@ void test_max_acceleration_tracking() {
 
     // Apply 2G acceleration
     fakeIMU.set(Vector<3>{0, 0, -20.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     double max1 = state->getMaxAcceleration();
     TEST_ASSERT_TRUE(max1 >= 0.0); // Should have increased
 
     // Apply 5G acceleration
     fakeIMU.set(Vector<3>{0, 0, -50.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     double max2 = state->getMaxAcceleration();
     TEST_ASSERT_TRUE(max2 >= max1); // Should have increased further
 
     // Apply lower acceleration (1G)
     fakeIMU.set(Vector<3>{0, 0, -10.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     double max3 = state->getMaxAcceleration();
     TEST_ASSERT_EQUAL_DOUBLE(max2, max3); // Should stay at max (not decrease)
@@ -158,7 +177,7 @@ void test_max_velocity_tracking() {
     for (int i = 0; i < 10; i++) {
         setMillis(i * 100);
         fakeIMU.set(Vector<3>{0, 0, -20.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Max velocity should have increased
@@ -173,7 +192,7 @@ void test_apogee_estimate_during_boost() {
 
     state->setGroundLevel(0.0);
     state->setFlightStage(FlightStage::BOOST);
-    state->update();
+    simulateUpdate();
 
     // During boost, apogee estimate should be calculated
     // Should be greater than current altitude
@@ -188,7 +207,7 @@ void test_apogee_estimate_during_coast() {
     // Update with low acceleration (coasting)
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     fakeBaro.set(95000.0, 15.0); // ~500m altitude
-    state->update();
+    simulateUpdate();
 
     // During coast, apogee estimate should be calculated
     double apogeeEst = state->getApogeeEstimate();
@@ -202,7 +221,7 @@ void test_apogee_estimate_after_apogee() {
     // Set altitude
     fakeBaro.set(95000.0, 15.0); // ~500m altitude
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    state->update();
+    simulateUpdate();
 
     // After apogee, estimate should use max altitude achieved
     double apogeeEst = state->getApogeeEstimate();
@@ -220,7 +239,7 @@ void test_time_to_apogee_calculation() {
     // Set conditions for upward velocity
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     fakeBaro.set(95000.0, 15.0);
-    state->update();
+    simulateUpdate();
 
     // Time to apogee should be calculated during ascent phases
     double timeToApogee = state->getTimeToApogee();
@@ -233,7 +252,7 @@ void test_off_vertical_angle_at_rest() {
     // Set low acceleration (at rest on pad)
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     fakeBaro.set(101325.0, 20.0);
-    state->update();
+    simulateUpdate();
 
     // Off-vertical angle should be small when at rest
     double angle = state->getOffVerticalAngle();
@@ -247,7 +266,7 @@ void test_off_vertical_angle_during_boost() {
     // Set high vertical acceleration
     fakeIMU.set(Vector<3>{0, 0, -40.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     fakeBaro.set(101325.0, 20.0);
-    state->update();
+    simulateUpdate();
 
     // Off-vertical angle should be calculated
     double angle = state->getOffVerticalAngle();
@@ -260,7 +279,7 @@ void test_state_getters_return_valid_values() {
     fakeBaro.setAltitude(0.0);
 
     state->setGroundLevel(0.0);
-    state->update();
+    simulateUpdate();
 
     // Test all getters return reasonable values
     TEST_ASSERT_TRUE(state->getAltitudeAGL() >= -100.0 && state->getAltitudeAGL() <= 100000.0);

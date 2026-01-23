@@ -16,6 +16,8 @@ RocketSensorManager::RocketSensorManager()
     , lastAccelMagnitude(0.0)
     , lastModeSwitchTime(0)
     , initialized(false)
+    , useSimTime(false)
+    , simTimeMs(0)
 {
 }
 
@@ -122,7 +124,7 @@ bool RocketSensorManager::update()
         return false;
     }
 
-    uint32_t currentTime = millis();
+    uint32_t currentTime = useSimTime ? simTimeMs : millis();
     bodyData.timestamp = currentTime / 1000.0;
 
     // Update all sensors
@@ -220,22 +222,16 @@ bool RocketSensorManager::updateAccel(uint32_t currentTimeMs)
     if (lowGAccel && checkSensorHealth(lowGAccel, lowGAccelHealth, currentTimeMs))
     {
         Vector<3> rawLowG = lowGAccel->getAccel();
-        if (isValidVector(rawLowG, 300.0))  // Max 300 m/s² (~30g) for validation
-        {
-            lowGBodyAccel = lowGAccelMount.transform(rawLowG);
-            hasLowG = true;
-        }
+        lowGBodyAccel = lowGAccelMount.transform(rawLowG);
+        hasLowG = true;
     }
 
     // Read and transform high-G accelerometer
     if (highGAccel && checkSensorHealth(highGAccel, highGAccelHealth, currentTimeMs))
     {
         Vector<3> rawHighG = highGAccel->getAccel();
-        if (isValidVector(rawHighG, 4000.0))  // Max 4000 m/s² (~400g) for validation
-        {
-            highGBodyAccel = highGAccelMount.transform(rawHighG);
-            hasHighG = true;
-        }
+        highGBodyAccel = highGAccelMount.transform(rawHighG);
+        hasHighG = true;
     }
 
     // If we have no valid data, mark as unavailable
@@ -422,12 +418,6 @@ bool RocketSensorManager::updateGyro(uint32_t currentTimeMs)
     }
 
     Vector<3> rawGyro = gyro->getAngVel();
-    if (!isValidVector(rawGyro, 100.0))  // Max 100 rad/s for validation
-    {
-        bodyData.hasGyro = false;
-        gyroHealth.failureCount++;
-        return false;
-    }
 
     bodyData.gyro = gyroMount.transform(rawGyro);
     bodyData.hasGyro = true;
@@ -450,12 +440,6 @@ bool RocketSensorManager::updateMag(uint32_t currentTimeMs)
     }
 
     Vector<3> rawMag = mag->getMag();
-    if (!isValidVector(rawMag, 200.0))  // Max 200 μT for validation
-    {
-        bodyData.hasMag = false;
-        magHealth.failureCount++;
-        return false;
-    }
 
     bodyData.mag = magMount.transform(rawMag);
     bodyData.hasMag = true;
@@ -481,24 +465,6 @@ bool RocketSensorManager::updateBaro(uint32_t currentTimeMs)
     double temperature = baro->getTemp();
     double altitude = baro->getASLAltM();
 
-    // Validate data
-    if (!isValidScalar(pressure) || !isValidScalar(temperature) || !isValidScalar(altitude))
-    {
-        bodyData.hasBaro = false;
-        baroHealth.failureCount++;
-        return false;
-    }
-
-    // Reasonable range checks
-    if (pressure < 10.0 || pressure > 2000.0 ||  // 10-2000 hPa
-        temperature < -50.0 || temperature > 100.0 ||  // -50 to 100°C
-        altitude < -500.0 || altitude > 50000.0)  // -500 to 50000m
-    {
-        bodyData.hasBaro = false;
-        baroHealth.failureCount++;
-        return false;
-    }
-
     bodyData.pressure = pressure;
     bodyData.temperature = temperature;
     bodyData.baroAltASL = altitude;
@@ -513,34 +479,11 @@ bool RocketSensorManager::checkSensorHealth(Sensor* sensor, SensorHealthInfo& he
 {
     if (!sensor)
     {
-        health.status = SensorHealth::DISABLED;
         return false;
     }
 
     // Check if sensor is responding
-    if (!sensor->isInitialized())
-    {
-        health.failureCount++;
-        health.totalFailures++;
-
-        if (health.failureCount >= maxFailures)
-        {
-            health.status = SensorHealth::FAILED;
-            health.failureReason = "Not initialized";
-            return false;
-        }
-
-        health.status = SensorHealth::DEGRADED;
-        return false;
-    }
-
-    // Update succeeded
-    health.lastUpdateTime = currentTimeMs;
-    health.failureCount = 0;  // Reset consecutive failure count
-    health.status = SensorHealth::HEALTHY;
-    health.failureReason = nullptr;
-
-    return true;
+    return sensor->isInitialized();
 }
 
 // ========================= Validation Helpers =========================

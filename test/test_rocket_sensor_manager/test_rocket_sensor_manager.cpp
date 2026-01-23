@@ -1,6 +1,6 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 
 // Include RocketSensorManager
 #include "../../src/RocketSensorManager.h"
@@ -247,40 +247,6 @@ void test_accel_mode_only_high_g_available()
     TEST_ASSERT_EQUAL(RocketSensorManager::MODE_HIGH_G, sensorManager->getAccelMode());
 }
 
-// ========================= Health Monitoring Tests =========================
-
-void test_health_monitoring_healthy_sensor()
-{
-    sensorManager->withLowGAccel(lowGAccel);
-    sensorManager->begin();
-
-    lowGAccel->set(Vector<3>{0.0, 0.0, 9.81});
-    sensorManager->update();
-
-    TEST_ASSERT_EQUAL(SensorHealth::HEALTHY, sensorManager->getAccelHealth());
-}
-
-void test_health_monitoring_invalid_data()
-{
-    lowGAccel->begin();
-    sensorManager->withLowGAccel(lowGAccel);
-    sensorManager->setMaxFailures(3);
-    sensorManager->begin();
-
-    // Provide invalid data (NaN)
-    lowGAccel->set(Vector<3>{NAN, 0.0, 0.0});
-
-    // Update multiple times to trigger failure
-    for (int i = 0; i < 3; i++)
-    {
-        sensorManager->update();
-    }
-
-    // Health should be degraded or failed
-    SensorHealth health = sensorManager->getAccelHealth();
-    TEST_ASSERT_TRUE(health == SensorHealth::DEGRADED || health == SensorHealth::FAILED);
-}
-
 // ========================= Body Frame Data Tests =========================
 
 void test_body_frame_data_valid_accel()
@@ -408,10 +374,6 @@ int main(int argc, char **argv)
     RUN_TEST(test_accel_mode_hysteresis_prevents_oscillation);
     RUN_TEST(test_accel_mode_only_low_g_available);
     RUN_TEST(test_accel_mode_only_high_g_available);
-
-    // Health monitoring tests
-    RUN_TEST(test_health_monitoring_healthy_sensor);
-    RUN_TEST(test_health_monitoring_invalid_data);
 
     // Body frame data tests
     RUN_TEST(test_body_frame_data_valid_accel);

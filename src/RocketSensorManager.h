@@ -166,6 +166,11 @@ public:
      */
     double getAccelMagnitude() const { return lastAccelMagnitude; }
 
+    /**
+     * Set simulation time for HITL mode
+     */
+    void setSimTime(uint32_t timeMs) { simTimeMs = timeMs; useSimTime = true; }
+
 private:
     // ========================= Sensor Instances =========================
 
@@ -211,6 +216,8 @@ private:
 
     BodyFrameData bodyData;
     bool initialized = false;
+    bool useSimTime = false;
+    uint32_t simTimeMs = 0;
 
     // ========================= Helper Methods =========================
 

@@ -246,6 +246,9 @@ void AstraRocket::update() {
                     // Convert simTime from seconds to milliseconds for Astra
                     double simTimeMs = simTime * 1000.0;
                     // This will read sensors from the HITL buffer
+                    if (rocketSensorManager) {
+                        rocketSensorManager->setSimTime((uint32_t)simTimeMs);
+                    }
                     astraSys->update(simTimeMs);
 
                     // Set ground level from first valid packet (after update)

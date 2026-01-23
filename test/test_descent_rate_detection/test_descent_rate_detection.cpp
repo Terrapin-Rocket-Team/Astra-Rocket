@@ -1,25 +1,30 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 #include <State/State.h>
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 
 using namespace astra_rocket;
 
 // Test fixtures
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-Sensor* testSensors[2];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 void setUp(void) {
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeIMU;
-
     fakeBaro.init();
     fakeIMU.init();
 
-    state = new RocketState(testSensors, 2);
+    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
+    sensorManager.withGyro(fakeIMU.getGyroSensor());
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
+    state = new RocketState();
+    state->withSensorManager(&sensorManager);
+    state->begin();
     state->setGroundLevel(0.0);
 
     setMillis(0);
@@ -29,6 +34,18 @@ void tearDown(void) {
     delete state;
     state = nullptr;
     resetMillis();
+}
+
+// Helper to simulate an update cycle
+void simulateUpdate(double dt = 0.02) {
+    // Get sensor data
+    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
+    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
+    double baroAlt = fakeBaro.getASLAltM();
+
+    // Call split update methods like Astra does
+    state->updateOrientation(gyro, accel, dt);
+    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
 }
 
 // Helper function to simulate descent with velocity
@@ -47,7 +64,7 @@ void simulateDescent(double startAlt, double endAlt, double descentRate, unsigne
         setMillis(currentTime);
         fakeBaro.setAltitude(currentAlt);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 }
 
@@ -61,7 +78,7 @@ void test_drogue_nominal_deployment() {
     // Start at 500m after apogee
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Simulate descent at 20 m/s for 1 second
     simulateDescent(500.0, 480.0, 20.0, 1000);
@@ -79,7 +96,7 @@ void test_drogue_slow_deployment() {
 
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Descend slowly at 5 m/s
     simulateDescent(500.0, 495.0, 5.0, 1000);
@@ -96,7 +113,7 @@ void test_drogue_fast_deployment() {
 
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Descend fast at 40 m/s
     simulateDescent(500.0, 460.0, 40.0, 1000);
@@ -113,7 +130,7 @@ void test_drogue_too_slow_no_detection() {
 
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Descend very slowly at 3 m/s (below threshold)
     simulateDescent(500.0, 497.0, 3.0, 1000);
@@ -132,7 +149,7 @@ void test_drogue_too_fast_ballistic() {
 
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Descend very fast at 60 m/s (ballistic - drogue failed)
     simulateDescent(500.0, 440.0, 60.0, 1000);
@@ -150,7 +167,7 @@ void test_drogue_partial_deployment() {
 
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Partial deployment - 35 m/s (within range but high)
     simulateDescent(500.0, 465.0, 35.0, 1000);
@@ -178,7 +195,7 @@ void test_drogue_entanglement_variable_rate() {
 
         fakeBaro.setAltitude(altitude);
         fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        state->update();
+        simulateUpdate();
     }
 
     // Should eventually detect drogue (rates are within range)
@@ -196,7 +213,7 @@ void test_main_nominal_deployment() {
 
     setMillis(20000);
     fakeBaro.setAltitude(300.0);
-    state->update();
+    simulateUpdate();
 
     // Descend at 5 m/s
     simulateDescent(300.0, 295.0, 5.0, 1000);
@@ -213,7 +230,7 @@ void test_main_slow_deployment() {
 
     setMillis(20000);
     fakeBaro.setAltitude(200.0);
-    state->update();
+    simulateUpdate();
 
     // Very slow descent at 2 m/s
     simulateDescent(200.0, 198.0, 2.0, 1000);
@@ -230,7 +247,7 @@ void test_main_fast_deployment() {
 
     setMillis(20000);
     fakeBaro.setAltitude(200.0);
-    state->update();
+    simulateUpdate();
 
     // Fast descent at 10 m/s
     simulateDescent(200.0, 190.0, 10.0, 1000);
@@ -247,7 +264,7 @@ void test_main_failed_deployment() {
 
     setMillis(20000);
     fakeBaro.setAltitude(200.0);
-    state->update();
+    simulateUpdate();
 
     // Still at drogue descent rate (20 m/s - main failed)
     simulateDescent(200.0, 180.0, 20.0, 1000);
@@ -265,7 +282,7 @@ void test_main_too_slow_no_movement() {
 
     setMillis(20000);
     fakeBaro.setAltitude(100.0);
-    state->update();
+    simulateUpdate();
 
     // Very slow at 1 m/s
     simulateDescent(100.0, 99.0, 1.0, 1000);
@@ -286,7 +303,7 @@ void test_main_trigger_at_400m() {
 
     // Descend from above 400m to below
     fakeBaro.setAltitude(450.0);
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::UNDER_DROGUE, state->getFlightStage());
 
     // Cross 400m threshold
@@ -308,7 +325,7 @@ void test_main_trigger_with_ground_offset() {
 
     // 500m MSL = 400m AGL
     fakeBaro.setAltitude(550.0); // 450m AGL
-    state->update();
+    simulateUpdate();
     TEST_ASSERT_EQUAL(FlightStage::UNDER_DROGUE, state->getFlightStage());
 
     // Cross threshold (400m AGL = 500m MSL)
@@ -329,7 +346,7 @@ void test_full_descent_sequence_nominal() {
 
     setMillis(10000);
     fakeBaro.setAltitude(1000.0);
-    state->update();
+    simulateUpdate();
 
     // Start descending - should transition to EXPECTING_DROGUE (and possibly UNDER_DROGUE)
     simulateDescent(1000.0, 995.0, 3.0, 500);
@@ -413,12 +430,12 @@ void test_descent_rate_from_barometer() {
 
     setMillis(10000);
     fakeBaro.setAltitude(500.0);
-    state->update();
+    simulateUpdate();
 
     // Descend at known rate
     setMillis(11000); // 1 second later
     fakeBaro.setAltitude(480.0); // 20m lower = 20 m/s
-    state->update();
+    simulateUpdate();
 
     // Vertical velocity should be approximately -20 m/s (negative = down)
     double vertVel = state->getVerticalVelocity();

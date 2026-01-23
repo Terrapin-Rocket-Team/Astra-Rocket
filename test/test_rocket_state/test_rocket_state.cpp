@@ -1,8 +1,9 @@
 #include <unity.h>
-#include "../../lib/NativeTestMocks/NativeTestHelper.h"
-#include "../../lib/NativeTestMocks/UnitTestSensors.h"
+#include <NativeTestHelper.h>
+#include <UnitTestSensors.h>
 #include <State/State.h>  // Force TRT-Astra to be included
 #include "../../src/RocketState.h"
+#include "../../src/RocketSensorManager.h"
 #include <cmath>
 
 using namespace astra_rocket;
@@ -12,23 +13,25 @@ using namespace astra;
 FakeBarometer fakeBaro;
 FakeAccel fakeAccel;
 FakeGyro fakeGyro;
-Sensor* testSensors[3];
+RocketSensorManager sensorManager;
 RocketState* state;
 
 void setUp(void)
 {
-    // set stuff up before each test here, if needed
-    testSensors[0] = &fakeBaro;
-    testSensors[1] = &fakeAccel;
-    testSensors[2] = &fakeGyro;
-
+    // Initialize sensors
     fakeBaro.init();
     fakeAccel.init();
     fakeGyro.init();
 
+    // Set up sensor manager
+    sensorManager.withLowGAccel(&fakeAccel);
+    sensorManager.withGyro(&fakeGyro);
+    sensorManager.withBaro(&fakeBaro);
+    sensorManager.begin();
+
     // Create RocketState with new API
     state = new RocketState();
-    state->withSensors(testSensors, 3);
+    state->withSensorManager(&sensorManager);
     state->begin();
     state->setGroundLevel(0.0);
 
