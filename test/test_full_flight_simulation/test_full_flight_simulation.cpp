@@ -2,29 +2,42 @@
 #include <NativeTestHelper.h>
 #include <UnitTestSensors.h>
 #include <State/State.h>
+#include <Sensors/SensorManager/SensorManager.h>
+#include <Filters/Filter.h>
+#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketSensorManager.h"
+#include "../../src/RocketKF.h"
 #include <cmath>
 
 using namespace astra_rocket;
+using namespace astra;
 
 // Test fixtures
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-RocketSensorManager sensorManager;
+SensorManager* sensorManager;
+RocketKF* kalmanFilter;
+MahonyAHRS* orientationFilter;
 RocketState* state;
 
 void setUp(void) {
     fakeBaro.init();
     fakeIMU.init();
 
-    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
-    sensorManager.withGyro(fakeIMU.getGyroSensor());
-    sensorManager.withBaro(&fakeBaro);
-    sensorManager.begin();
+    // Create sensor manager
+    sensorManager = new SensorManager();
+    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
+    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
+    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->begin();
 
-    state = new RocketState();
-    state->withSensorManager(&sensorManager);
+    // Create filters
+    kalmanFilter = new RocketKF();
+    orientationFilter = new MahonyAHRS();
+
+    // Create state with filters
+    state = new RocketState(kalmanFilter, orientationFilter);
+    state->withSensorManager(sensorManager);
     state->begin();
     state->setGroundLevel(0.0);
 
@@ -33,20 +46,28 @@ void setUp(void) {
 
 void tearDown(void) {
     delete state;
+    delete kalmanFilter;
+    delete orientationFilter;
+    delete sensorManager;
     state = nullptr;
+    kalmanFilter = nullptr;
+    orientationFilter = nullptr;
+    sensorManager = nullptr;
     resetMillis();
 }
 
 // Helper to simulate an update cycle
 void simulateUpdate(double dt = 0.02) {
-    // Get sensor data
-    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
-    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
-    double baroAlt = fakeBaro.getASLAltM();
+    // Advance time
+    unsigned long currentMillis = millis();
+    setMillis(currentMillis + (unsigned long)(dt * 1000.0));
 
-    // Call split update methods like Astra does
-    state->updateOrientation(gyro, accel, dt);
-    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+    // Update sensor manager
+    sensorManager->update();
+
+    // Update state (expects time in seconds, not milliseconds)
+    double newTime = millis() / 1000.0;
+    state->update(newTime);
 }
 
 // ===== HELPER FUNCTIONS FOR FLIGHT SIMULATION =====
@@ -165,9 +186,8 @@ void test_nominal_flight_all_stages() {
     TEST_ASSERT_TRUE(finalStage == FlightStage::LANDED ||
                      finalStage == FlightStage::UNDER_MAIN);
 
-    // Verify max values were tracked
-    TEST_ASSERT_TRUE(state->getMaxAcceleration() > 5.0);
-    TEST_ASSERT_TRUE(state->getMaxVelocity() >= 0.0);
+    // Note: Max acceleration and velocity tracking removed from RocketState
+    // Flight completed successfully if we reached LANDED or UNDER_MAIN stage
 }
 
 void test_low_altitude_flight() {
@@ -520,30 +540,23 @@ void test_tree_landing() {
 // ===== PERFORMANCE AND TRACKING TESTS =====
 
 void test_max_values_throughout_flight() {
-    // Verify max values are tracked throughout entire flight
+    // Note: Max acceleration and velocity tracking removed from RocketState
+    // Verify flight progresses correctly instead
     simulateNominalFlight();
 
-    double maxAccel = state->getMaxAcceleration();
-    double maxVel = state->getMaxVelocity();
-
-    // Should have recorded some maximums
-    TEST_ASSERT_TRUE(maxAccel > 1.0); // At least experienced liftoff
-    TEST_ASSERT_TRUE(maxVel >= 0.0);
-
-    // Max values should not be NaN or Inf
-    TEST_ASSERT_TRUE(std::isfinite(maxAccel));
-    TEST_ASSERT_TRUE(std::isfinite(maxVel));
+    // Just verify flight completed
+    FlightStage stage = state->getFlightStage();
+    TEST_ASSERT_TRUE(stage >= FlightStage::APOGEE);
 }
 
 void test_apogee_tracking_full_flight() {
-    // Verify apogee estimate is reasonable throughout flight
+    // Note: Apogee estimation removed from RocketState
+    // Verify apogee stage is detected instead
     simulateNominalFlight();
 
-    double apogee = state->getApogeeEstimate();
-
-    // Should have a reasonable apogee estimate
-    TEST_ASSERT_TRUE(std::isfinite(apogee));
-    TEST_ASSERT_TRUE(apogee >= 0.0);
+    // Verify we reached at least apogee stage
+    FlightStage stage = state->getFlightStage();
+    TEST_ASSERT_TRUE(stage >= FlightStage::APOGEE);
 }
 
 void test_no_invalid_transitions() {

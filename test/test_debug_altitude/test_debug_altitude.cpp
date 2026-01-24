@@ -4,17 +4,23 @@
 
 // include other headers you need to test here
 #include <State/State.h>
+#include <Sensors/SensorManager/SensorManager.h>
+#include <Filters/Filter.h>
+#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketSensorManager.h"
+#include "../../src/RocketKF.h"
 
 using namespace astra_rocket;
+using namespace astra;
 
 // ---
 
 // Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-RocketSensorManager sensorManager;
+SensorManager* sensorManager;
+RocketKF* kalmanFilter;
+MahonyAHRS* orientationFilter;
 RocketState* state;
 
 // ---
@@ -24,13 +30,20 @@ void setUp(void)
     fakeBaro.init();
     fakeIMU.init();
 
-    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
-    sensorManager.withGyro(fakeIMU.getGyroSensor());
-    sensorManager.withBaro(&fakeBaro);
-    sensorManager.begin();
+    // Create sensor manager
+    sensorManager = new SensorManager();
+    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
+    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
+    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->begin();
 
-    state = new RocketState();
-    state->withSensorManager(&sensorManager);
+    // Create filters
+    kalmanFilter = new RocketKF();
+    orientationFilter = new MahonyAHRS();
+
+    // Create state with filters
+    state = new RocketState(kalmanFilter, orientationFilter);
+    state->withSensorManager(sensorManager);
     state->begin();
 
     setMillis(0);
@@ -39,20 +52,23 @@ void setUp(void)
 void tearDown(void)
 {
     delete state;
+    delete kalmanFilter;
+    delete orientationFilter;
+    delete sensorManager;
     state = nullptr;
+    kalmanFilter = nullptr;
+    orientationFilter = nullptr;
+    sensorManager = nullptr;
     resetMillis();
 }
 
 // Helper to simulate an update cycle
 void simulateUpdate(double dt = 0.02) {
-    // Get sensor data
-    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
-    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
-    double baroAlt = fakeBaro.getASLAltM();
+    // Update sensor manager
+    sensorManager->update();
 
-    // Call split update methods like Astra does
-    state->updateOrientation(gyro, accel, dt);
-    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+    // Update state
+    state->update(dt * 1000.0); // Convert to milliseconds
 }
 
 // ---

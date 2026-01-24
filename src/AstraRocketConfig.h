@@ -23,46 +23,9 @@ namespace astra_rocket {
  * - Deployment logic parameters
  * - Logging rates for different flight phases
  */
-class AstraRocketConfig {
+class AstraRocketConfig : public AstraConfig {
 public:
     AstraRocketConfig();
-
-    // ===== Sensor Configuration =====
-
-    /**
-     * Set barometer sensor (nullptr = auto-detect)
-     */
-    AstraRocketConfig& withBarometer(Barometer *baro);
-
-    /**
-     * Set GPS sensor (nullptr = auto-detect or disable)
-     */
-    AstraRocketConfig& withGPS(GPS *gps);
-
-    /**
-     * Set IMU sensor (nullptr = auto-detect)
-     */
-    // AstraRocketConfig& withIMU(IMU *imu);
-
-    /**
-     * Set high-G accelerometer (nullptr = auto-detect)
-     */
-    AstraRocketConfig& withHighGAccel(Accel *accel);
-
-    /**
-     * Set low-G accelerometer (nullptr = auto-detect or disable)
-     */
-    AstraRocketConfig& withAccel(Accel *accel);
-
-    /**
-     * Set gyroscope (nullptr = auto-detect or disable)
-     */
-    AstraRocketConfig& withGyro(Gyro *gyro);
-
-    /**
-     * Set magnetometer (nullptr = auto-detect or disable)
-     */
-    AstraRocketConfig& withMag(Mag *mag);
 
     // ===== Flight Detection Thresholds =====
 
@@ -184,36 +147,10 @@ public:
      */
     AstraRocketConfig& withRadioSerial(SerialUART_t &serial);
 
-    // ===== HITL (Hardware-In-The-Loop) Configuration =====
-
-    /**
-     * Enable HITL simulation mode
-     * When enabled, uses simulated sensors instead of hardware
-     * Default: false
-     */
-    AstraRocketConfig& withHITL(bool enable);
-
     // ===== Base Astra Configuration Pass-through =====
-
-    /**
-     * Set main update rate (Hz)
-     * Default: 50.0 Hz
-     */
-    AstraRocketConfig& withUpdateRate(double rateHz);
-
-    /**
-     * Get the underlying AstraConfig object
-     */
-    AstraConfig* getAstraConfig() { return &astraConfig; }
+    // Note: All AstraConfig methods are now directly available through inheritance
 
     // Getters for all configuration parameters
-    Barometer* getBarometer() const { return barometer; }
-    GPS* getGPS() const { return gps; }
-    // IMU* getIMU() const { return imu; }
-    Accel* getHighGAccel() const { return highGAccel; }
-    Accel* getAccel() const { return lowGAccel; }
-    Gyro* getGyro() const { return gyro; }
-    Mag* getMag() const { return mag; }
 
     double getLiftoffAccelThreshold() const { return liftoffAccelThreshold; }
     unsigned long getLiftoffDetectDuration() const { return liftoffDetectDuration; }
@@ -229,28 +166,13 @@ public:
     double getPostflightLogRate() const { return postflightLogRate; }
     bool getFlashBackup() const { return flashBackup; }
 
-    bool getBuzzerFeedback() const { return buzzerFeedback; }
-    int getLEDStatusPin() const { return ledStatusPin; }
-    int getSensorStatusLEDPin() const { return sensorStatusLEDPin; }
-    int getGPSStatusLEDPin() const { return gpsStatusLEDPin; }
+    SensorManager *getSensorManager() const { return sensorManager; }
 
     SerialUART_t* getRadioSerial() const { return radioSerial; }
 
-    bool getHITLEnabled() const { return hitlEnabled; }
+    bool getHITLEnabled() const { return hitlMode; }
 
 private:
-    // Base Astra configuration
-    AstraConfig astraConfig;
-
-    // Sensor instances
-    Barometer *barometer;
-    GPS *gps;
-    // IMU *imu;
-    Accel *highGAccel;
-    Accel *lowGAccel;
-    Gyro *gyro;
-    Mag *mag;
-
     // Flight detection thresholds
     double liftoffAccelThreshold;
     unsigned long liftoffDetectDuration;
@@ -269,17 +191,11 @@ private:
     double postflightLogRate;
     bool flashBackup;
 
-    // Status indicators configuration
-    bool buzzerFeedback;
-    int ledStatusPin;
-    int sensorStatusLEDPin;
-    int gpsStatusLEDPin;
-
     // Radio configuration
     SerialUART_t *radioSerial;
 
     // HITL configuration
-    bool hitlEnabled;
+    bool hitlMode;
 };
 
 } // namespace astra_rocket

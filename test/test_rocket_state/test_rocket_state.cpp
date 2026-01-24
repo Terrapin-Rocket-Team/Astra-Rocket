@@ -1,9 +1,12 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
 #include <UnitTestSensors.h>
-#include <State/State.h>  // Force TRT-Astra to be included
+#include <State/State.h>
+#include <Sensors/SensorManager/SensorManager.h>
+#include <Filters/Filter.h>
+#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketSensorManager.h"
+#include "../../src/RocketKF.h"
 #include <cmath>
 
 using namespace astra_rocket;
@@ -13,7 +16,9 @@ using namespace astra;
 FakeBarometer fakeBaro;
 FakeAccel fakeAccel;
 FakeGyro fakeGyro;
-RocketSensorManager sensorManager;
+SensorManager* sensorManager;
+RocketKF* kalmanFilter;
+MahonyAHRS* orientationFilter;
 RocketState* state;
 
 void setUp(void)
@@ -23,15 +28,20 @@ void setUp(void)
     fakeAccel.init();
     fakeGyro.init();
 
-    // Set up sensor manager
-    sensorManager.withLowGAccel(&fakeAccel);
-    sensorManager.withGyro(&fakeGyro);
-    sensorManager.withBaro(&fakeBaro);
-    sensorManager.begin();
+    // Create sensor manager
+    sensorManager = new SensorManager();
+    sensorManager->setPrimaryAccel(&fakeAccel);
+    sensorManager->setPrimaryGyro(&fakeGyro);
+    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->begin();
 
-    // Create RocketState with new API
-    state = new RocketState();
-    state->withSensorManager(&sensorManager);
+    // Create filters
+    kalmanFilter = new RocketKF();
+    orientationFilter = new MahonyAHRS();
+
+    // Create RocketState with filters
+    state = new RocketState(kalmanFilter, orientationFilter);
+    state->withSensorManager(sensorManager);
     state->begin();
     state->setGroundLevel(0.0);
 
@@ -40,29 +50,38 @@ void setUp(void)
 
 void tearDown(void)
 {
-    // clean stuff up after each test here, if needed
     delete state;
+    delete kalmanFilter;
+    delete orientationFilter;
+    delete sensorManager;
     state = nullptr;
+    kalmanFilter = nullptr;
+    orientationFilter = nullptr;
+    sensorManager = nullptr;
     resetMillis();
 }
 
 // Helper to simulate an update cycle
 void simulateUpdate(double dt = 0.02) {
-    // Get sensor data
-    Vector<3> accel = fakeAccel.getAccel();
-    Vector<3> gyro = fakeGyro.getAngVel();
-    double baroAlt = fakeBaro.getASLAltM();
+    // Advance time
+    unsigned long currentMillis = millis();
+    setMillis(currentMillis + (unsigned long)(dt * 1000.0));
 
-    // Call split update methods like Astra does
-    state->updateOrientation(gyro, accel, dt);
-    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+    // Update sensor manager
+    sensorManager->update();
+
+    // Update state (expects time in seconds, not milliseconds)
+    double newTime = millis() / 1000.0;
+    state->update(newTime);
 }
 
 // ===== BASIC INITIALIZATION TESTS =====
 
 void test_rocket_state_initialization() {
-    // Test that RocketState can be instantiated with no sensors
-    RocketState emptyState;
+    // Test that RocketState can be instantiated
+    RocketKF kf;
+    MahonyAHRS ahrs;
+    RocketState emptyState(&kf, &ahrs);
 
     // Verify initial flight stage is PAD_IDLE
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, emptyState.getFlightStage());
@@ -70,8 +89,6 @@ void test_rocket_state_initialization() {
     // Verify initial values are reasonable
     TEST_ASSERT_EQUAL_DOUBLE(0.0, emptyState.getTimeInStage());
     TEST_ASSERT_EQUAL_DOUBLE(0.0, emptyState.getAltitudeAGL());
-    TEST_ASSERT_EQUAL_DOUBLE(0.0, emptyState.getMaxAcceleration());
-    TEST_ASSERT_EQUAL_DOUBLE(0.0, emptyState.getMaxVelocity());
 }
 
 void test_ground_level_setting() {
@@ -148,99 +165,36 @@ void test_negative_altitude_agl() {
     TEST_ASSERT_EQUAL_DOUBLE(-5.0, state->getAltitudeAGL());
 }
 
-// ===== VERTICAL COMPONENT CALCULATION EDGE CASES =====
+// ===== SENSOR UPDATE TESTS =====
 
-void test_vertical_acceleration_zero() {
-    // Test with zero acceleration (free fall)
+void test_altitude_updates() {
+    // Test that altitude updates correctly
     fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, 0});
+    fakeAccel.set(Vector<3>{0, 0, -9.81});
     simulateUpdate();
 
-    double vertAccel = state->getVerticalAcceleration();
-    // Should be close to 0
-    TEST_ASSERT_TRUE(fabs(vertAccel) < 0.1);
-}
+    TEST_ASSERT_EQUAL_DOUBLE(100.0, state->getAltitudeAGL());
 
-void test_vertical_acceleration_high_g() {
-    // Test with very high acceleration (200G)
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, -1962.0}); // 200G
-    simulateUpdate();
-
-    double vertAccel = state->getVerticalAcceleration();
-    // Should be approximately 200G
-    TEST_ASSERT_TRUE(fabs(vertAccel - 200.0) < 10.0); // Allow some tolerance
-}
-
-void test_vertical_acceleration_negative() {
-    // Test with upward acceleration in NED frame (negative z)
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, 9.81}); // -1G in NED
-    simulateUpdate();
-
-    double vertAccel = state->getVerticalAcceleration();
-    // Should be approximately -1G (downward)
-    TEST_ASSERT_TRUE(vertAccel < 0.0);
-}
-
-// ===== MAX VALUE TRACKING EDGE CASES =====
-
-void test_max_acceleration_tracking() {
-    state->setFlightStage(FlightStage::BOOST);
-
-    // Start with low acceleration
-    fakeAccel.set(Vector<3>{0, 0, -19.62}); // 2G
-    simulateUpdate();
-    TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 1.9);
-
-    // Increase to 10G
-    fakeAccel.set(Vector<3>{0, 0, -98.1}); // 10G
+    fakeBaro.setAltitude(200.0);
     setMillis(100);
     simulateUpdate();
-    TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 9.0);
 
-    // Drop back to 2G - max should stay at 10G
-    fakeAccel.set(Vector<3>{0, 0, -19.62});
-    setMillis(200);
-    simulateUpdate();
-    TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 9.0);
+    TEST_ASSERT_EQUAL_DOUBLE(200.0, state->getAltitudeAGL());
 }
 
-void test_max_velocity_tracking() {
-    state->setFlightStage(FlightStage::COAST);
+// ===== ALTITUDE TRACKING TESTS =====
 
-    // Simulate increasing then decreasing velocity
-    // Note: Velocity depends on State class calculations
-    for (int i = 0; i < 10; i++) {
-        fakeBaro.setAltitude(100.0 + i * 10.0);
-        setMillis(i * 100);
-        simulateUpdate();
-    }
-
-    double maxVel1 = state->getMaxVelocity();
-
-    // Descend
-    for (int i = 0; i < 10; i++) {
-        fakeBaro.setAltitude(200.0 - i * 10.0);
-        setMillis(1000 + i * 100);
-        simulateUpdate();
-    }
-
-    double maxVel2 = state->getMaxVelocity();
-
-    // Max velocity should not decrease
-    TEST_ASSERT_TRUE(maxVel2 >= maxVel1);
-}
-
-void test_max_altitude_tracking() {
+void test_altitude_ascent() {
     // Ascend to apogee
     for (int i = 0; i < 50; i++) {
         fakeBaro.setAltitude(i * 20.0); // Up to 1000m
+        fakeAccel.set(Vector<3>{0, 0, -9.81});
         setMillis(i * 100);
         simulateUpdate();
     }
 
-    double maxAlt1 = state->getAltitudeAGL();
+    double apogeeAlt = state->getAltitudeAGL();
+    TEST_ASSERT_TRUE(apogeeAlt >= 900.0 && apogeeAlt <= 1100.0);
 
     // Descend
     state->setFlightStage(FlightStage::UNDER_DROGUE);
@@ -252,8 +206,8 @@ void test_max_altitude_tracking() {
 
     double currentAlt = state->getAltitudeAGL();
 
-    // Current altitude should be lower than max
-    TEST_ASSERT_TRUE(currentAlt < maxAlt1);
+    // Current altitude should be lower than apogee
+    TEST_ASSERT_TRUE(currentAlt < apogeeAlt);
 }
 
 // ===== OFF-VERTICAL ANGLE EDGE CASES =====
@@ -337,26 +291,20 @@ void test_all_getters_return_valid_values() {
     simulateUpdate();
 
     TEST_ASSERT_TRUE(std::isfinite(state->getAltitudeAGL()));
-    TEST_ASSERT_TRUE(std::isfinite(state->getVerticalVelocity()));
-    TEST_ASSERT_TRUE(std::isfinite(state->getVerticalAcceleration()));
-    TEST_ASSERT_TRUE(std::isfinite(state->getMaxAcceleration()));
-    TEST_ASSERT_TRUE(std::isfinite(state->getMaxVelocity()));
-    TEST_ASSERT_TRUE(std::isfinite(state->getApogeeEstimate()));
-    TEST_ASSERT_TRUE(std::isfinite(state->getTimeToApogee()));
     TEST_ASSERT_TRUE(std::isfinite(state->getOffVerticalAngle()));
     TEST_ASSERT_TRUE(std::isfinite(state->getTimeInStage()));
 }
 
 void test_getters_no_sensors() {
-    // Test that getters work even with no sensors
-    RocketState emptyState;
-    // Call updateOrientation with dummy data
-    emptyState.updateOrientation(Vector<3>(0,0,0), Vector<3>(0,0,-9.81), 0.02);
+    // Test that getters work even without sensor updates
+    RocketKF kf;
+    MahonyAHRS ahrs;
+    RocketState emptyState(&kf, &ahrs);
 
     // Should not crash and return valid (possibly zero) values
     TEST_ASSERT_TRUE(std::isfinite(emptyState.getAltitudeAGL()));
-    TEST_ASSERT_TRUE(std::isfinite(emptyState.getVerticalVelocity()));
-    TEST_ASSERT_TRUE(std::isfinite(emptyState.getMaxAcceleration()));
+    TEST_ASSERT_TRUE(std::isfinite(emptyState.getOffVerticalAngle()));
+    TEST_ASSERT_TRUE(std::isfinite(emptyState.getTimeInStage()));
 }
 
 // ===== SENSOR DATA EDGE CASES =====
@@ -432,15 +380,11 @@ int main(int argc, char **argv)
     RUN_TEST(test_ground_level_not_set);
     RUN_TEST(test_negative_altitude_agl);
 
-    // Vertical component calculations
-    RUN_TEST(test_vertical_acceleration_zero);
-    RUN_TEST(test_vertical_acceleration_high_g);
-    RUN_TEST(test_vertical_acceleration_negative);
+    // Sensor updates
+    RUN_TEST(test_altitude_updates);
 
-    // Max value tracking
-    RUN_TEST(test_max_acceleration_tracking);
-    RUN_TEST(test_max_velocity_tracking);
-    RUN_TEST(test_max_altitude_tracking);
+    // Altitude tracking
+    RUN_TEST(test_altitude_ascent);
 
     // Off-vertical angle
     RUN_TEST(test_off_vertical_angle_vertical_flight);

@@ -35,12 +35,6 @@ void tearDown(void)
 void test_config_default_values() {
     AstraRocketConfig config;
 
-    // Test default sensor pointers are null (auto-detect)
-    TEST_ASSERT_NULL(config.getBarometer());
-    TEST_ASSERT_NULL(config.getGPS());
-    TEST_ASSERT_NULL(config.getAccel());
-    TEST_ASSERT_NULL(config.getHighGAccel());
-
     // Test default flight detection thresholds
     TEST_ASSERT_EQUAL_DOUBLE(3.0, config.getLiftoffAccelThreshold());
     TEST_ASSERT_EQUAL_UINT32(100, config.getLiftoffDetectDuration());
@@ -54,37 +48,6 @@ void test_config_default_values() {
     TEST_ASSERT_EQUAL_DOUBLE(50.0, config.getFlightLogRate());
     TEST_ASSERT_EQUAL_DOUBLE(1.0, config.getPostflightLogRate());
     TEST_ASSERT_FALSE(config.getFlashBackup());
-
-    // Test default status indicators
-    TEST_ASSERT_TRUE(config.getBuzzerFeedback());
-    TEST_ASSERT_EQUAL_INT(LED_BUILTIN, config.getLEDStatusPin());
-}
-
-void test_config_with_barometer() {
-    AstraRocketConfig config;
-
-    // Set barometer
-    config.withBarometer(&fakeBaro);
-
-    TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
-}
-
-void test_config_with_gps() {
-    AstraRocketConfig config;
-
-    // Set GPS
-    config.withGPS(&fakeGPS);
-
-    TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
-}
-
-void test_config_with_accel() {
-    AstraRocketConfig config;
-
-    // Set Accel
-    config.withAccel(&fakeAccel);
-
-    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
 }
 
 void test_config_with_liftoff_threshold() {
@@ -191,60 +154,16 @@ void test_config_with_flash_backup() {
     TEST_ASSERT_FALSE(config.getFlashBackup());
 }
 
-void test_config_with_buzzer_feedback() {
-    AstraRocketConfig config;
-
-    // Disable buzzer
-    config.withBuzzerFeedback(false);
-
-    TEST_ASSERT_FALSE(config.getBuzzerFeedback());
-
-    // Enable buzzer
-    config.withBuzzerFeedback(true);
-
-    TEST_ASSERT_TRUE(config.getBuzzerFeedback());
-}
-
-void test_config_with_led_status_pin() {
-    AstraRocketConfig config;
-
-    // Set LED status pin
-    config.withLEDStatusPin(13);
-
-    TEST_ASSERT_EQUAL_INT(13, config.getLEDStatusPin());
-}
-
 void test_config_builder_chaining() {
     AstraRocketConfig config;
 
     // Test that methods can be chained
-    config.withBarometer(&fakeBaro)
-          .withGPS(&fakeGPS)
-          .withAccel(&fakeAccel)
-          .withLiftoffAccelThreshold(5.0)
-          .withFlightLogRate(75.0)
-          .withBuzzerFeedback(false);
+    config.withLiftoffAccelThreshold(5.0)
+          .withFlightLogRate(75.0);
 
     // Verify all settings applied
-    TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
-    TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
-    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
     TEST_ASSERT_EQUAL_DOUBLE(5.0, config.getLiftoffAccelThreshold());
     TEST_ASSERT_EQUAL_DOUBLE(75.0, config.getFlightLogRate());
-    TEST_ASSERT_FALSE(config.getBuzzerFeedback());
-}
-
-void test_config_multiple_sensors() {
-    AstraRocketConfig config;
-
-    // Set all sensors
-    config.withBarometer(&fakeBaro)
-          .withGPS(&fakeGPS)
-          .withAccel(&fakeAccel);
-
-    TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
-    TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
-    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
 }
 
 void test_config_all_flight_thresholds() {
@@ -286,52 +205,30 @@ void test_config_all_logging_settings() {
 void test_config_astra_config_access() {
     AstraRocketConfig config;
 
-    // Verify we can access the underlying AstraConfig
-    TEST_ASSERT_NOT_NULL(config.getAstraConfig());
-}
-
-void test_config_update_rate() {
-    AstraRocketConfig config;
-
-    // Set update rate through pass-through method
-    config.withUpdateRate(100.0);
-
-    // This should propagate to the underlying AstraConfig
-    // We can't directly test this without accessing the AstraConfig internals,
-    // but we can verify the method returns the config for chaining
-    AstraRocketConfig& returnedConfig = config.withUpdateRate(75.0);
-
-    TEST_ASSERT_EQUAL_PTR(&config, &returnedConfig);
+    // Verify that AstraRocketConfig inherits from AstraConfig
+    // We can now use AstraConfig methods directly on the config object
+    AstraConfig* astraConfig = &config;
+    TEST_ASSERT_NOT_NULL(astraConfig);
 }
 
 void test_config_complex_scenario() {
     AstraRocketConfig config;
 
     // Configure for a high-power rocket with custom settings
-    config.withBarometer(&fakeBaro)
-          .withAccel(&fakeAccel)
-          .withGPS(&fakeGPS)
-          .withLiftoffAccelThreshold(6.0)          // High-thrust motor
+    config.withLiftoffAccelThreshold(6.0)          // High-thrust motor
           .withLiftoffDetectDuration(50)           // Faster detection
           .withBurnoutAccelThreshold(2.5)          // Higher burnout threshold
           .withApogeeVelocityThreshold(3.0)        // Higher threshold for high altitude
           .withFlightLogRate(100.0)                // High-rate logging
-          .withSDCardCS(10)
-          .withBuzzerFeedback(true)
-          .withLEDStatusPin(13);
+          .withSDCardCS(10);
 
     // Verify complex configuration
-    TEST_ASSERT_EQUAL_PTR(&fakeBaro, config.getBarometer());
-    TEST_ASSERT_EQUAL_PTR(&fakeAccel, config.getAccel());
-    TEST_ASSERT_EQUAL_PTR(&fakeGPS, config.getGPS());
     TEST_ASSERT_EQUAL_DOUBLE(6.0, config.getLiftoffAccelThreshold());
     TEST_ASSERT_EQUAL_UINT32(50, config.getLiftoffDetectDuration());
     TEST_ASSERT_EQUAL_DOUBLE(2.5, config.getBurnoutAccelThreshold());
     TEST_ASSERT_EQUAL_DOUBLE(3.0, config.getApogeeVelocityThreshold());
     TEST_ASSERT_EQUAL_DOUBLE(100.0, config.getFlightLogRate());
     TEST_ASSERT_EQUAL_INT(10, config.getSDCardCS());
-    TEST_ASSERT_TRUE(config.getBuzzerFeedback());
-    TEST_ASSERT_EQUAL_INT(13, config.getLEDStatusPin());
 }
 
 // ---
@@ -343,9 +240,6 @@ int main(int argc, char **argv)
 
     // Add your tests here
     RUN_TEST(test_config_default_values);
-    RUN_TEST(test_config_with_barometer);
-    RUN_TEST(test_config_with_gps);
-    RUN_TEST(test_config_with_accel);
     RUN_TEST(test_config_with_liftoff_threshold);
     RUN_TEST(test_config_with_liftoff_duration);
     RUN_TEST(test_config_with_burnout_threshold);
@@ -357,14 +251,10 @@ int main(int argc, char **argv)
     RUN_TEST(test_config_with_flight_log_rate);
     RUN_TEST(test_config_with_postflight_log_rate);
     RUN_TEST(test_config_with_flash_backup);
-    RUN_TEST(test_config_with_buzzer_feedback);
-    RUN_TEST(test_config_with_led_status_pin);
     RUN_TEST(test_config_builder_chaining);
-    RUN_TEST(test_config_multiple_sensors);
     RUN_TEST(test_config_all_flight_thresholds);
     RUN_TEST(test_config_all_logging_settings);
     RUN_TEST(test_config_astra_config_access);
-    RUN_TEST(test_config_update_rate);
     RUN_TEST(test_config_complex_scenario);
 
     UNITY_END();

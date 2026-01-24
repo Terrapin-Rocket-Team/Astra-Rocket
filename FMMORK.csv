@@ -1,5 +1,5 @@
 # Time (s),Altitude (ft),Vertical velocity (m/s),Vertical acceleration (m/s²),Position East of launch (ft),Position North of launch (ft),Latitude (° N),Longitude (° E),Roll rate (r/s),Pitch rate (r/s),Yaw rate (r/s),Air temperature (°F),Air pressure (mbar)
-0,0,0,0,0,0,28.61,-80.6,0,0,0,59,1013.25
+0,0,0,-9.81,0,0,28.61,-80.6,0,0,0,59,1013.25
 0.011,0.003,0.237,49.576,-0,0,28.61,-80.6,0,0,0,59,1013.25
 0.021,0.019,0.734,49.79,-0,0,28.61,-80.6,0,0,0,59,1013.249
 0.031,0.051,1.233,50.005,-0,0,28.61,-80.6,0,0,0,59,1013.248

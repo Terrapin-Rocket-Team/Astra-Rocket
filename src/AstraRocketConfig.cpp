@@ -3,14 +3,7 @@
 namespace astra_rocket {
 
 AstraRocketConfig::AstraRocketConfig()
-    : barometer(nullptr),
-      gps(nullptr),
-    //   imu(nullptr),
-      highGAccel(nullptr),
-      lowGAccel(nullptr),
-      gyro(nullptr),
-      mag(nullptr),
-      liftoffAccelThreshold(3.0),
+    : liftoffAccelThreshold(3.0),
       liftoffDetectDuration(100),
       burnoutAccelThreshold(1.5),
       apogeeVelocityThreshold(2.0),
@@ -42,51 +35,8 @@ AstraRocketConfig::AstraRocketConfig()
       flightLogRate(50.0),
       postflightLogRate(1.0),
       flashBackup(false),
-      buzzerFeedback(false),
-      ledStatusPin(-15),
-      sensorStatusLEDPin(-155),
-      gpsStatusLEDPin(-1555),
-      radioSerial(&Serial2),
-      hitlEnabled(false)
+      radioSerial(&Serial2)
 {
-    // Configure base AstraConfig with sensible defaults
-    astraConfig.withUpdateRate(50.0);  // 50 Hz default update rate
-}
-
-// Sensor configuration
-AstraRocketConfig& AstraRocketConfig::withBarometer(Barometer *baro) {
-    barometer = baro;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withGPS(GPS *gpsPtr) {
-    gps = gpsPtr;
-    return *this;
-}
-
-// AstraRocketConfig& AstraRocketConfig::withIMU(IMU *imuPtr) {
-//     imu = imuPtr;
-//     return *this;
-// }
-
-AstraRocketConfig& AstraRocketConfig::withHighGAccel(Accel *accel) {
-    highGAccel = accel;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withAccel(Accel *accel) {
-    lowGAccel = accel;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withGyro(Gyro *gyroPtr) {
-    gyro = gyroPtr;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withMag(Mag *magPtr) {
-    mag = magPtr;
-    return *this;
 }
 
 // Flight detection thresholds
@@ -152,42 +102,9 @@ AstraRocketConfig& AstraRocketConfig::withFlashBackup(bool enable) {
     return *this;
 }
 
-// Status indicators configuration
-AstraRocketConfig& AstraRocketConfig::withBuzzerFeedback(bool enable) {
-    buzzerFeedback = enable;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withLEDStatusPin(int pin) {
-    ledStatusPin = pin;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withSensorStatusLEDPin(int pin) {
-    sensorStatusLEDPin = pin;
-    return *this;
-}
-
-AstraRocketConfig& AstraRocketConfig::withGPSStatusLEDPin(int pin) {
-    gpsStatusLEDPin = pin;
-    return *this;
-}
-
 // Radio configuration
 AstraRocketConfig& AstraRocketConfig::withRadioSerial(SerialUART_t &serial) {
     radioSerial = &serial;
-    return *this;
-}
-
-// HITL configuration
-AstraRocketConfig& AstraRocketConfig::withHITL(bool enable) {
-    hitlEnabled = enable;
-    return *this;
-}
-
-// Base Astra configuration pass-through
-AstraRocketConfig& AstraRocketConfig::withUpdateRate(double rateHz) {
-    astraConfig.withUpdateRate(rateHz);
     return *this;
 }
 

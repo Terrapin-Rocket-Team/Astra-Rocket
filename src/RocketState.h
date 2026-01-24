@@ -26,43 +26,12 @@ public:
      * @param filter Optional Kalman filter for state estimation
      * @param orientationFilter Optional Mahony AHRS filter for orientation estimation
      */
-    RocketState(Filter *filter = nullptr, MahonyAHRS *orientationFilter = nullptr);
-
-    /**
-     * Initialize state estimation
-     * @return true if initialization successful
-     */
-    bool begin() override;
+    RocketState(Filter *filter, MahonyAHRS *orientationFilter);
 
     /**
      * Get current flight stage
      */
     FlightStage getFlightStage() const { return currentStage; }
-
-    /**
-     * Get estimated apogee altitude (meters ASL)
-     */
-    double getApogeeEstimate() const { return apogeeEstimate; }
-
-    /**
-     * Get time to apogee (seconds, negative if past apogee)
-     */
-    double getTimeToApogee() const { return timeToApogee; }
-
-    /**
-     * Get maximum acceleration experienced (G's)
-     */
-    double getMaxAcceleration() const { return maxAcceleration; }
-
-    /**
-     * Get maximum velocity achieved (m/s)
-     */
-    double getMaxVelocity() const { return maxVelocity; }
-
-    /**
-     * Get vertical acceleration (G's, positive = up)
-     */
-    double getVerticalAcceleration() const { return verticalAccel; }
 
     /**
      * Get off-vertical angle (degrees from vertical)
@@ -72,12 +41,7 @@ public:
     /**
      * Get altitude above ground level (meters)
      */
-    double getAltitudeAGL() const { return altitudeAGL; }
-
-    /**
-     * Get vertical velocity (m/s, positive = up)
-     */
-    double getVerticalVelocity() const { return verticalVelocity; }
+    double getAltitudeAGL() const { return position.z(); }
 
     /**
      * Set ground level altitude (for AGL calculations)
@@ -95,9 +59,7 @@ public:
      */
     double getTimeInStage() const { return timeInCurrentStage; }
 
-    // Override split update methods to add rocket-specific logic
-    void updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, double dt) override;
-    void updateMeasurements(const Vector<3> &gpsPos, double baroAlt, bool hasGPS, bool hasBaro, double currentTime = -1) override;
+    void update(double ms = -1) override;
 
 private:
     // Flight stage tracking
@@ -106,33 +68,12 @@ private:
     double timeInCurrentStage;
     unsigned long stageStartTime;
 
-    // Altitude tracking
-    double groundLevelAltitude;  // MSL altitude of launch pad
-    double baroOffset;           // Offset to subtract from baro before feeding to KF (for zeroing)
-    double altitudeAGL;          // Altitude above ground level
-    double maxAltitudeAGL;       // Maximum altitude achieved
-    double previousAltitudeAGL;  // Previous altitude for velocity calculation
-
-    // Velocity tracking
-    double verticalVelocity;     // Vertical component of velocity
-    double maxVelocity;          // Maximum total velocity
-
-    // Acceleration tracking
-    double verticalAccel;        // Vertical acceleration in G's
-    double maxAcceleration;      // Maximum acceleration in G's
-
-    // Apogee estimation
-    double apogeeEstimate;       // Estimated apogee altitude MSL
-    double timeToApogee;         // Estimated time to apogee
-
     // Orientation tracking
     double offVerticalAngle;     // Angle from vertical axis
 
     // Helper methods
     void detectFlightStage();
-    void updateApogeeEstimate();
-    void updateMaxValues();
-    void calculateVerticalComponents();
+    void calculateTilt();
 
     // Stage detection thresholds (can be made configurable)
     static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0 * 9.81;      // m/s's

@@ -4,17 +4,23 @@
 
 // include other headers you need to test here
 #include <State/State.h>
+#include <Sensors/SensorManager/SensorManager.h>
+#include <Filters/Filter.h>
+#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketSensorManager.h"
+#include "../../src/RocketKF.h"
 
 using namespace astra_rocket;
+using namespace astra;
 
 // ---
 
 // Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
-RocketSensorManager sensorManager;
+SensorManager* sensorManager;
+RocketKF* kalmanFilter;
+MahonyAHRS* orientationFilter;
 RocketState* state;
 
 // ---
@@ -26,15 +32,20 @@ void setUp(void)
     fakeBaro.init();
     fakeIMU.init();
 
-    // Set up sensor manager
-    sensorManager.withLowGAccel(fakeIMU.getAccelSensor());
-    sensorManager.withGyro(fakeIMU.getGyroSensor());
-    sensorManager.withBaro(&fakeBaro);
-    sensorManager.begin();
+    // Create sensor manager
+    sensorManager = new SensorManager();
+    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
+    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
+    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->begin();
+
+    // Create filters
+    kalmanFilter = new RocketKF();
+    orientationFilter = new MahonyAHRS();
 
     // Create new RocketState for each test
-    state = new RocketState();
-    state->withSensorManager(&sensorManager);
+    state = new RocketState(kalmanFilter, orientationFilter);
+    state->withSensorManager(sensorManager);
     state->begin();
 
     // Reset time
@@ -45,20 +56,28 @@ void tearDown(void)
 {
     // clean stuff up after each test here, if needed
     delete state;
+    delete kalmanFilter;
+    delete orientationFilter;
+    delete sensorManager;
     state = nullptr;
+    kalmanFilter = nullptr;
+    orientationFilter = nullptr;
+    sensorManager = nullptr;
     resetMillis();  // Reset fake time for next test
 }
 
 // Helper to simulate an update cycle
 void simulateUpdate(double dt = 0.02) {
-    // Get sensor data
-    Vector<3> accel = fakeIMU.getAccelSensor()->getAccel();
-    Vector<3> gyro = fakeIMU.getGyroSensor()->getAngVel();
-    double baroAlt = fakeBaro.getASLAltM();
+    // Advance time
+    unsigned long currentMillis = millis();
+    setMillis(currentMillis + (unsigned long)(dt * 1000.0));
 
-    // Call split update methods like Astra does
-    state->updateOrientation(gyro, accel, dt);
-    state->updateMeasurements(Vector<3>(0, 0, 0), baroAlt, false, true, -1);
+    // Update sensor manager
+    sensorManager->update();
+
+    // Update state (expects time in seconds, not milliseconds)
+    double newTime = millis() / 1000.0;
+    state->update(newTime);
 }
 
 // ---
@@ -109,141 +128,28 @@ void test_altitude_agl_with_elevated_ground_level() {
     TEST_ASSERT_TRUE(agl >= 490.0 && agl <= 510.0);
 }
 
-void test_vertical_velocity_calculation() {
+// Note: The following tests have been removed because the methods were removed from RocketState:
+// - getVerticalVelocity()
+// - getVerticalAcceleration()
+// - getMaxAcceleration()
+// - getMaxVelocity()
+// - getApogeeEstimate()
+// - getTimeToApogee()
+//
+// The library has been pruned to focus on core flight stage detection.
+
+void test_basic_state_update() {
+    // Test that state updates work without errors
     state->setGroundLevel(0.0);
     setMillis(0);
 
-    // Set initial altitude
     fakeBaro.set(101325.0, 20.0);
     fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
     simulateUpdate();
 
-    // The vertical velocity is calculated from the state's internal filter
-    // For this test, we just verify the getter works
-    double vertVel = state->getVerticalVelocity();
-    TEST_ASSERT_TRUE(vertVel >= -100.0 && vertVel <= 100.0); // Sanity check
-}
-
-void test_vertical_acceleration_calculation() {
-    state->setGroundLevel(0.0);
-
-    // Set high acceleration (3G upward = -30 m/s^2 in IMU z-axis)
-    fakeBaro.set(101325.0, 20.0);
-    fakeIMU.set(Vector<3>{0, 0, -30.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    simulateUpdate();
-
-    // Vertical acceleration should be approximately 3G
-    // Note: Actual value depends on state's acceleration calculation
-    double vertAccel = state->getVerticalAcceleration();
-    TEST_ASSERT_TRUE(vertAccel >= -10.0 && vertAccel <= 10.0); // Sanity check
-}
-
-void test_max_acceleration_tracking() {
-    state->setGroundLevel(0.0);
-
-    // Initially should be 0
-    TEST_ASSERT_EQUAL_DOUBLE(0.0, state->getMaxAcceleration());
-
-    // Apply 2G acceleration
-    fakeIMU.set(Vector<3>{0, 0, -20.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    simulateUpdate();
-
-    double max1 = state->getMaxAcceleration();
-    TEST_ASSERT_TRUE(max1 >= 0.0); // Should have increased
-
-    // Apply 5G acceleration
-    fakeIMU.set(Vector<3>{0, 0, -50.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    simulateUpdate();
-
-    double max2 = state->getMaxAcceleration();
-    TEST_ASSERT_TRUE(max2 >= max1); // Should have increased further
-
-    // Apply lower acceleration (1G)
-    fakeIMU.set(Vector<3>{0, 0, -10.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    simulateUpdate();
-
-    double max3 = state->getMaxAcceleration();
-    TEST_ASSERT_EQUAL_DOUBLE(max2, max3); // Should stay at max (not decrease)
-}
-
-void test_max_velocity_tracking() {
-    state->setGroundLevel(0.0);
-
-    // Initially should be 0
-    TEST_ASSERT_EQUAL_DOUBLE(0.0, state->getMaxVelocity());
-
-    // Update multiple times to build up velocity
-    // (In practice, velocity comes from the state filter)
-    for (int i = 0; i < 10; i++) {
-        setMillis(i * 100);
-        fakeIMU.set(Vector<3>{0, 0, -20.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-        simulateUpdate();
-    }
-
-    // Max velocity should have increased
-    double maxVel = state->getMaxVelocity();
-    TEST_ASSERT_TRUE(maxVel >= 0.0);
-}
-
-void test_apogee_estimate_during_boost() {
-    // Update with high acceleration at 100m altitude
-    fakeIMU.set(Vector<3>{0, 0, -40.0}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    fakeBaro.setAltitude(100.0);
-
-    state->setGroundLevel(0.0);
-    state->setFlightStage(FlightStage::BOOST);
-    simulateUpdate();
-
-    // During boost, apogee estimate should be calculated
-    // Should be greater than current altitude
-    double apogeeEst = state->getApogeeEstimate();
-    TEST_ASSERT_TRUE(apogeeEst >= 0.0); // Should be non-negative
-}
-
-void test_apogee_estimate_during_coast() {
-    state->setGroundLevel(0.0);
-    state->setFlightStage(FlightStage::COAST);
-
-    // Update with low acceleration (coasting)
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    fakeBaro.set(95000.0, 15.0); // ~500m altitude
-    simulateUpdate();
-
-    // During coast, apogee estimate should be calculated
-    double apogeeEst = state->getApogeeEstimate();
-    TEST_ASSERT_TRUE(apogeeEst >= 0.0);
-}
-
-void test_apogee_estimate_after_apogee() {
-    state->setGroundLevel(0.0);
-    state->setFlightStage(FlightStage::UNDER_DROGUE);
-
-    // Set altitude
-    fakeBaro.set(95000.0, 15.0); // ~500m altitude
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    simulateUpdate();
-
-    // After apogee, estimate should use max altitude achieved
-    double apogeeEst = state->getApogeeEstimate();
-    TEST_ASSERT_TRUE(apogeeEst >= 0.0);
-
-    // Time to apogee should be 0 (already past it)
-    double timeToApogee = state->getTimeToApogee();
-    TEST_ASSERT_EQUAL_DOUBLE(0.0, timeToApogee);
-}
-
-void test_time_to_apogee_calculation() {
-    state->setGroundLevel(0.0);
-    state->setFlightStage(FlightStage::COAST);
-
-    // Set conditions for upward velocity
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
-    fakeBaro.set(95000.0, 15.0);
-    simulateUpdate();
-
-    // Time to apogee should be calculated during ascent phases
-    double timeToApogee = state->getTimeToApogee();
-    TEST_ASSERT_TRUE(timeToApogee >= 0.0);
+    // Verify basic getters work
+    TEST_ASSERT_TRUE(state->getAltitudeAGL() >= -100.0);
+    TEST_ASSERT_TRUE(state->getOffVerticalAngle() >= 0.0);
 }
 
 void test_off_vertical_angle_at_rest() {
@@ -281,15 +187,10 @@ void test_state_getters_return_valid_values() {
     state->setGroundLevel(0.0);
     simulateUpdate();
 
-    // Test all getters return reasonable values
+    // Test all available getters return reasonable values
     TEST_ASSERT_TRUE(state->getAltitudeAGL() >= -100.0 && state->getAltitudeAGL() <= 100000.0);
-    TEST_ASSERT_TRUE(state->getVerticalVelocity() >= -1000.0 && state->getVerticalVelocity() <= 1000.0);
-    TEST_ASSERT_TRUE(state->getVerticalAcceleration() >= -100.0 && state->getVerticalAcceleration() <= 100.0);
-    TEST_ASSERT_TRUE(state->getMaxAcceleration() >= 0.0 && state->getMaxAcceleration() <= 1000.0);
-    TEST_ASSERT_TRUE(state->getMaxVelocity() >= 0.0 && state->getMaxVelocity() <= 10000.0);
-    TEST_ASSERT_TRUE(state->getApogeeEstimate() >= 0.0);
-    TEST_ASSERT_TRUE(state->getTimeToApogee() >= 0.0);
     TEST_ASSERT_TRUE(state->getOffVerticalAngle() >= 0.0 && state->getOffVerticalAngle() <= 180.0);
+    TEST_ASSERT_TRUE(state->getTimeInStage() >= 0.0);
 }
 
 // ---
@@ -303,14 +204,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_ground_level_initialization);
     RUN_TEST(test_altitude_agl_calculation);
     RUN_TEST(test_altitude_agl_with_elevated_ground_level);
-    RUN_TEST(test_vertical_velocity_calculation);
-    RUN_TEST(test_vertical_acceleration_calculation);
-    RUN_TEST(test_max_acceleration_tracking);
-    RUN_TEST(test_max_velocity_tracking);
-    RUN_TEST(test_apogee_estimate_during_boost);
-    RUN_TEST(test_apogee_estimate_during_coast);
-    RUN_TEST(test_apogee_estimate_after_apogee);
-    RUN_TEST(test_time_to_apogee_calculation);
+    RUN_TEST(test_basic_state_update);
     RUN_TEST(test_off_vertical_angle_at_rest);
     RUN_TEST(test_off_vertical_angle_during_boost);
     RUN_TEST(test_state_getters_return_valid_values);

@@ -18,177 +18,109 @@
 #include "RocketState.h"
 #include "RocketKF.h"
 #include "FlightStage.h"
-#include "RocketSensorManager.h"
 
 using namespace astra;
 
-namespace astra_rocket {
-
-/**
- * AstraRocket: High-level rocketry flight computer wrapper
- *
- * Provides a simple interface for rocket flight computers built on TRT-Astra.
- * Features:
- * - Automatic sensor detection and initialization
- * - Flight-aware logging with automatic file management
- * - Flight stage detection and tracking
- * - Recovery event detection (based on descent rate changes)
- *
- * Basic usage:
- *   AstraRocket rocket;
- *   rocket.init();
- *   while(1) rocket.update();
- */
-class AstraRocket {
-public:
-    /**
-     * Default constructor
-     * Uses auto-detected sensors and default configuration
-     */
-    AstraRocket();
+namespace astra_rocket
+{
 
     /**
-     * Constructor with custom configuration
-     * @param config AstraRocketConfig object with custom settings
-     */
-    AstraRocket(AstraRocketConfig &config);
-
-    /**
-     * Destructor
-     */
-    ~AstraRocket();
-
-    /**
-     * Initialize the flight computer
-     * - Auto-detects sensors (if not specified in config)
-     * - Initializes all sensors
-     * - Sets up logging
-     * - Performs pre-flight checks
+     * AstraRocket: High-level rocketry flight computer wrapper
      *
-     * @return true if initialization successful, false otherwise
+     * Provides a simple interface for rocket flight computers built on TRT-Astra.
+     * Features:
+     * - Automatic sensor detection and initialization
+     * - Flight-aware logging with automatic file management
+     * - Flight stage detection and tracking
+     * - Recovery event detection (based on descent rate changes)
+     *
+     * Basic usage:
+     *   AstraRocket rocket;
+     *   rocket.init();
+     *   while(1) rocket.update();
      */
-    bool init();
+    class AstraRocket
+    {
+    public:
+        /**
+         * Default constructor
+         * Uses auto-detected sensors and default configuration
+         */
+        AstraRocket();
 
-    /**
-     * Update the flight computer state
-     * Should be called in main loop()
-     * - Updates all sensors
-     * - Updates state estimation
-     * - Handles flight stage transitions
-     * - Manages logging
-     */
-    void update();
+        /**
+         * Constructor with custom configuration
+         * @param config AstraRocketConfig object with custom settings
+         */
+        AstraRocket(AstraRocketConfig &config);
 
-    /**
-     * Get the current flight stage
-     */
-    FlightStage getFlightStage() const;
+        /**
+         * Destructor
+         */
+        ~AstraRocket();
 
-    /**
-     * Get the rocket state object
-     */
-    RocketState* getRocketState() { return rocketState; }
+        /**
+         * Initialize the flight computer
+         * - Auto-detects sensors (if not specified in config)
+         * - Initializes all sensors
+         * - Sets up logging
+         * - Performs pre-flight checks
+         *
+         * @return true if initialization successful, false otherwise
+         */
+        bool init();
 
-    /**
-     * Get the underlying Astra system object
-     */
-    Astra* getAstraSystem() { return astraSys; }
+        /**
+         * Update the flight computer state
+         * Should be called in main loop()
+         * - Updates all sensors
+         * - Updates state estimation
+         * - Handles flight stage transitions
+         * - Manages logging
+         */
+        void update();
 
-    /**
-     * Get barometer sensor
-     */
-    Barometer* getBarometer() const { return barometer; }
+        /**
+         * Get the rocket state object
+         */
+        RocketState *getRocketState() { return rocketState; }
 
-    /**
-     * Get GPS sensor
-     */
-    GPS* getGPS() const { return gps; }
+        /**
+         * Get the underlying Astra system object
+         */
+        Astra *getAstraSystem() { return astraSys; }
 
-    /**
-     * Get IMU sensor
-     */
-    // IMU* getIMU() const { return imu; }
+    private:
+        bool ready = false;
+        // Configuration
+        AstraRocketConfig &config;
 
-    /**
-     * Get high-G accelerometer
-     */
-    Accel* getHighGAccel() const { return highGAccel; }
+        // Core Astra system
+        Astra *astraSys;
+        RocketState *rocketState;
+        RocketKF *kalmanFilter;
+        MahonyAHRS *orientationFilter;
 
-private:
-    // Configuration
-    static AstraRocketConfig defaultConfig;  // Static default configuration
-    AstraRocketConfig &config;
+        // Logging
+        ILogSink **dataSinks;
+        ILogSink **eventSinks;
+        int numDataSinks;
+        int numEventSinks;
 
-    // Core Astra system
-    Astra *astraSys;
-    RocketState *rocketState;
-    RocketKF *kalmanFilter;
-    MahonyAHRS *orientationFilter;
+        // Flight tracking
+        unsigned long liftoffTime;
+        double groundLevelAltitude;
 
-    // Sensor management
-    RocketSensorManager *rocketSensorManager;
+        // HITL tracking
+        bool hitlGroundLevelSet;
 
-    // Sensors
-    Barometer *barometer;
-    GPS *gps;
+        // Helper methods
+        void setupLogging();
 
-    // Composite IMUs (owned by AstraRocket, must be deleted in destructor)
-    // These contain the actual sensor data; accel/gyro/mag pointers reference their components
-    IMU6DoF *imu6;   // BMI088 or similar 6DoF IMU
-    IMU9DoF *imu9;   // BNO055 or similar 9DoF IMU
-
-    // Component sensor pointers (reference IMU components, do NOT delete these)
-    Accel *accel;
-    Gyro *gyro;
-    Mag *mag;
-    Accel *highGAccel;
-
-    Sensor **sensorArray;
-    int numSensors;
-
-    // Logging
-    ILogSink **dataSinks;
-    ILogSink **eventSinks;
-    int numDataSinks;
-    int numEventSinks;
-
-    // Flight tracking
-    unsigned long liftoffTime;
-    FlightStage previousStage;
-    double groundLevelAltitude;
-
-    // HITL tracking
-    bool hitlGroundLevelSet;
-
-    // I2C scan cache
-    uint8_t i2c_addresses[20];
-    uint8_t i2c_device_count;
-    bool i2c_scanned;
-    uint8_t i2c_claimed_addresses[20];  // Addresses already claimed by sensors
-    uint8_t i2c_claimed_count;
-
-    // Helper methods
-    bool autoDetectSensors();
-    void setupLogging();
-    void handleStageTransition(FlightStage newStage);
-    void updateStatusIndicators();
-
-    // Sensor auto-detection helpers
-    void scanI2CBus(uint8_t* addresses, uint8_t& count, uint8_t maxCount);  // Scan I2C bus and return active addresses
-    bool isAddressClaimed(uint8_t addr);  // Check if address is already claimed by a sensor
-    void claimAddress(uint8_t addr);      // Mark address as claimed
-    Barometer* detectBarometer();
-    GPS* detectGPS();
-    // IMU* detectIMU();
-    Accel* detectAccel();
-    Gyro* detectGyro();
-    Mag* detectMag();
-    Accel* detectHighGAccel();
-
-    // Constants
-    static constexpr int ASTRA_ROCKET_MAX_SENSORS = 10;
-    static constexpr int ASTRA_ROCKET_MAX_LOG_SINKS = 5;
-};
+        // Constants
+        static constexpr int ASTRA_ROCKET_MAX_SENSORS = 10;
+        static constexpr int ASTRA_ROCKET_MAX_LOG_SINKS = 5;
+    };
 
 } // namespace astra_rocket
 
