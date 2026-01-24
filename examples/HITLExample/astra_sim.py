@@ -37,10 +37,20 @@ class PhysicsSim(DataSource):
         print("[Sim] Using Internal Physics Engine")
     def get_next_packet(self) -> PacketData:
         self.t += self.dt
+        # Inertial acceleration (ENU frame, +Z is up)
         accel_z = 30.0 if 2.0 < self.t < 4.0 else (-9.81 if self.alt > 0 else 0.0)
         self.vel += accel_z * self.dt; self.alt += self.vel * self.dt
         if self.alt < 0: self.alt, self.vel, accel_z = 0, 0, 0
-        return PacketData(self.t, np.array([0., 0., accel_z + 9.81]), np.zeros(3), np.zeros(3),
+
+        # Accelerometer measures specific force = -(inertial_accel + gravity)
+        # ENU: gravity = -9.81, so specific_force_z = -inertial_accel - (-9.81) = -accel_z + 9.81
+        # At rest: -0 + 9.81 = +9.81 ❌ WAIT this is still wrong!
+        # Actually: specific_force = -(inertial_accel) + gravity_force
+        # gravity_force on accelerometer = -9.81 (downward)
+        # At rest: inertial=0, specific = 0 - 9.81 = -9.81 ✓
+        # Boost: inertial=30, specific = -30 - 9.81 = -39.81 ✓
+        accel_measured = -accel_z - 9.81
+        return PacketData(self.t, np.array([0., 0., accel_measured]), np.zeros(3), np.zeros(3),
                           1013.25 - (self.alt * 0.12), 25.0, 45.0, -122.0, self.alt, 1, 8, 0.0)
 
 class CSVSim(DataSource):

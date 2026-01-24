@@ -12,6 +12,7 @@
  * Hardware: Teensy 4.1 or STM32
  * USB Baud: 115200
  */
+#ifndef PIO_UNIT_TESTING
 
 #include <Arduino.h>
 #include <AstraRocket.h>
@@ -87,3 +88,5 @@ void loop()
     // 3. Updates state estimation with simulation time
     // 4. Outputs TELEM/ packet automatically via DataLogger
 }
+
+#endif // PIO_UNIT_TESTING

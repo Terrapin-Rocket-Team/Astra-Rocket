@@ -56,19 +56,24 @@ def main():
     # --- 3. Handshake Phase ---
     print("\n[Init] Waiting for Flight Computer Header...")
     print("       (Please reset/boot the Flight Computer now)")
-    
+
     fc_col_map = None
     fc_header_names = []
-    
+
     # Wait indefinitely for the header
-    while True:
-        line = link.read_line()
-        if line and line.startswith("TELEM/") and ("State" in line or "Time" in line):
-            fc_col_map, fc_header_names = parse_telem_header(line)
-            print(f"[Init] Header Received! Found {len(fc_header_names)} columns.")
-            print(f"[Init] Columns: {fc_header_names}")
-            break
-        time.sleep(0.01)
+    try:
+        while True:
+            line = link.read_line()
+            if line and line.startswith("TELEM/") and ("State" in line or "Time" in line):
+                fc_col_map, fc_header_names = parse_telem_header(line)
+                print(f"[Init] Header Received! Found {len(fc_header_names)} columns.")
+                print(f"[Init] Columns: {fc_header_names}")
+                break
+            time.sleep(0.01)
+    except ConnectionError as e:
+        print(f"\n[Error] Connection died during handshake: {e}")
+        link.close()
+        sys.exit(1)
 
     print("[Init] Handshake Complete. Starting Simulation in 1s...")
     time.sleep(1.0)
@@ -82,13 +87,14 @@ def main():
     last_stage = "BOOT"
     pkt_count = 0
     
+    connection_alive = True
     try:
-        while True:
+        while connection_alive:
             # A. Get Next Packet
             if sim.is_finished():
                 print("\n[Sim] CSV Finished. Exiting Loop.")
                 break
-            
+
             packet = sim.get_next_packet()
             pkt_count += 1
             msg = packet.to_hitl_string().encode()
@@ -97,30 +103,42 @@ def main():
             attempts = 0
             max_retries = 3
             fc_response_line = None
-            
+
             while attempts < max_retries:
                 try:
                     link.send(msg)
-                except ConnectionError:
-                    print("\n[Link] Connection Died.")
+                except ConnectionError as e:
+                    print(f"\n[Link] Connection Died during send: {e}")
+                    connection_alive = False
                     break
 
                 # Wait for Response (1.0s timeout)
                 start_wait = time.time()
                 got_response = False
-                
+
                 while (time.time() - start_wait) < 1.0:
-                    line = link.read_line()
-                    if line and line.startswith("TELEM/"):
-                        fc_response_line = line
-                        got_response = True
+                    try:
+                        line = link.read_line()
+                        if line and line.startswith("TELEM/"):
+                            fc_response_line = line
+                            got_response = True
+                            break
+                    except ConnectionError as e:
+                        print(f"\n[Link] Connection Died during read: {e}")
+                        connection_alive = False
                         break
-                
+
+                if not connection_alive:
+                    break
+
                 if got_response:
                     break
                 else:
                     attempts += 1
-            
+
+            if not connection_alive:
+                break
+
             if attempts >= max_retries:
                 if pkt_count % 50 == 0:
                      print(f"\r[FC] Timeout - Packet {pkt_count} skipped.\033[K", end='')

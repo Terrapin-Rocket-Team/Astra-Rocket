@@ -59,7 +59,7 @@ public:
      */
     double getTimeInStage() const { return timeInCurrentStage; }
 
-    void update(double ms = -1) override;
+    void update(double currentTimeSec = -1) override;
 
 private:
     // Flight stage tracking
@@ -76,9 +76,9 @@ private:
     void calculateTilt();
 
     // Stage detection thresholds (can be made configurable)
-    static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0 * 9.81;      // m/s's
+    static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0 * 9.81;      // m/s² (3.0G)
     static constexpr unsigned long LIFTOFF_DURATION = 100;      // ms
-    static constexpr double BURNOUT_ACCEL_THRESHOLD = 2.0 * 9.81;      // m/s's
+    static constexpr double BURNOUT_ACCEL_THRESHOLD = 1.5 * 9.81;      // m/s² (1.5G)
     static constexpr unsigned long BURNOUT_DURATION = 200;      // ms
     static constexpr double APOGEE_VELOCITY_THRESHOLD = 2.0;    // m/s
     static constexpr double LANDING_VELOCITY_THRESHOLD = 1.0;   // m/s

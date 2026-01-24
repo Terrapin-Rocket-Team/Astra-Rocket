@@ -193,9 +193,6 @@ private:
 
     // Radio configuration
     SerialUART_t *radioSerial;
-
-    // HITL configuration
-    bool hitlMode;
 };
 
 } // namespace astra_rocket

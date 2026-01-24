@@ -25,7 +25,6 @@ namespace astra_rocket
           groundLevelAltitude(0),
           hitlGroundLevelSet(false)
     {
-
     }
 
     AstraRocket::~AstraRocket()
@@ -113,7 +112,7 @@ namespace astra_rocket
             }
             else
             {
-                LOGE("Barometer not available!!");
+                LOGE("Barometer not available!");
                 return false;
             }
         }
@@ -127,6 +126,7 @@ namespace astra_rocket
 
     void AstraRocket::update()
     {
+
         if (!ready)
         {
             LOGE("AstraRocket not initialized!");
@@ -135,54 +135,44 @@ namespace astra_rocket
         // Check if HITL mode is enabled
         if (config.getHITLEnabled())
         {
+
             // HITL mode: wait for incoming sensor data from simulation
             if (Serial.available())
             {
                 String line = Serial.readStringUntil('\n');
-                LOGI("DEBUG: Received line (length=%d): %.50s...", line.length(), line.c_str());
 
                 if (line.startsWith("HITL/"))
                 {
                     // Parse incoming HITL packet
-                    LOGI("DEBUG: HITL packet detected");
+
                     double simTime;
                     if (HITLParser::parseAndInject(line.c_str(), simTime))
                     {
-                        LOGI("DEBUG: HITL parse SUCCESS, simTime=%0.3f", simTime);
 
-                        // Update with simulation time (NOT millis()!)
-                        // Convert simTime from seconds to milliseconds for Astra
-                        double simTimeMs = simTime * 1000.0;
-                        LOGI("DEBUG: Calling astraSys->update(%0.3f)", simTimeMs);
-                        bool updateResult = astraSys->update(simTimeMs);
-                        LOGI("DEBUG: astraSys->update() returned %d", updateResult);
-                        LOGI("DEBUG: didLog=%d, didUpdateSensors=%d, didUpdateState=%d",
-                             astraSys->didLog(), astraSys->didUpdateSensors(), astraSys->didUpdateState());
+                        // Update with simulation time (in seconds)
+                        // simTime is already in seconds from the HITL packet
+                        bool updateResult = astraSys->update(simTime);
 
                         // Set ground level from first valid packet (after update)
                         if (!hitlGroundLevelSet)
                         {
                             auto barometer = config.getSensorManager()->getPrimaryBaro();
-                            LOGI("SITL: Setting ground level.");
+
                             // Debug: Check what pressure value we're reading
                             HITLSensorBuffer &buffer = HITLSensorBuffer::instance();
-                            LOGI("HITL Debug: Buffer pressure = %0.2f hPa", buffer.data.pressure);
-                            LOGI("HITL Debug: Barometer pressure = %0.2f hPa", barometer->getPressure());
 
                             groundLevelAltitude = barometer->getASLAltM();
                             rocketState->setGroundLevel(groundLevelAltitude);
                             hitlGroundLevelSet = true;
-                            LOGI("HITL: Ground level established at %0.2f m MSL from first packet", groundLevelAltitude);
                         }
                     }
                     else
                     {
-                        LOGE("DEBUG: HITL parse FAILED");
+                        LOGE("AstraRocket::update() - HITL parse FAILED");
                     }
                 }
                 else
                 {
-                    LOGI("DEBUG: Not a HITL packet, ignoring");
                 }
             }
             else
@@ -192,6 +182,7 @@ namespace astra_rocket
         }
         else
         {
+
             // Normal hardware mode: update with real time
             astraSys->update();
         }

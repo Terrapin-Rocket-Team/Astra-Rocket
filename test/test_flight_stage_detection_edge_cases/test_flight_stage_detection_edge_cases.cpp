@@ -60,8 +60,9 @@ void simulateUpdate(double dt = 0.02) {
     // Update sensor manager
     sensorManager->update();
 
-    // Update state
-    state->update(dt * 1000.0); // Convert to milliseconds
+    // Update state (expects absolute time in seconds, not delta)
+    double newTime = millis() / 1000.0;
+    state->update(newTime);
 }
 
 // ===== LIFTOFF DETECTION EDGE CASES =====

@@ -34,6 +34,8 @@ class SerialLink(FlightComputerLink):
             try:
                 line = self.ser.readline()
                 return line.decode('utf-8', errors='ignore').strip()
+            except serial.SerialException as e:
+                raise ConnectionError(f"Serial read error: {e}")
             except Exception:
                 return None
         return None
