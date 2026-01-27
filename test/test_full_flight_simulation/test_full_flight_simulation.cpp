@@ -1,10 +1,7 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
 #include <UnitTestSensors.h>
-#include <State/State.h>
 #include <Sensors/SensorManager/SensorManager.h>
-#include <Filters/Filter.h>
-#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
 #include "../../src/RocketKF.h"
 #include <cmath>
@@ -67,7 +64,9 @@ void simulateUpdate(double dt = 0.02) {
 
     // Update state (expects time in seconds, not milliseconds)
     double newTime = millis() / 1000.0;
-    state->update(newTime);
+    state->predictState(newTime);  // Prediction step
+
+    state->update(newTime);        // Measurement update
 }
 
 // ===== HELPER FUNCTIONS FOR FLIGHT SIMULATION =====

@@ -2,7 +2,7 @@
 #define ROCKET_STATE_H
 
 #include <State/State.h>
-#include <Filters/Filter.h>
+#include <Filters/LinearKalmanFilter.h>
 #include <Sensors/Sensor.h>
 #include "FlightStage.h"
 
@@ -26,7 +26,7 @@ public:
      * @param filter Optional Kalman filter for state estimation
      * @param orientationFilter Optional Mahony AHRS filter for orientation estimation
      */
-    RocketState(Filter *filter, MahonyAHRS *orientationFilter);
+    RocketState(LinearKalmanFilter *filter, MahonyAHRS *orientationFilter);
 
     /**
      * Get current flight stage
@@ -90,14 +90,20 @@ private:
     static constexpr double MAIN_DESCENT_MIN = 2.0;             // m/s minimum under main
     static constexpr double MAIN_DESCENT_MAX = 10.0;            // m/s maximum under main
     static constexpr double MAIN_DEPLOY_ALTITUDE = 400.0;       // m AGL to start expecting main
+    static constexpr unsigned long DROGUE_DETECT_DURATION = 2000; // ms to confirm drogue
+    static constexpr unsigned long MAIN_DETECT_DURATION = 2000;   // ms to confirm main
 
     // Tracking for sustained condition detection
     unsigned long highAccelStartTime;
     unsigned long lowAccelStartTime;
     unsigned long lowVelocityStartTime;
+    unsigned long drogueDetectStartTime;
+    unsigned long mainDetectStartTime;
     bool highAccelDetected;
     bool lowAccelDetected;
     bool lowVelocityDetected;
+    bool drogueRateDetected;
+    bool mainRateDetected;
 };
 
 } // namespace astra_rocket

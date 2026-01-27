@@ -2,6 +2,7 @@ import csv
 import socket
 import numpy as np
 from dataclasses import dataclass
+from scipy.spatial.transform import Rotation
 
 @dataclass
 class PacketData:
@@ -13,10 +14,12 @@ class PacketData:
     temp: float        # C
     lat: float
     lon: float
-    alt: float
+    alt: float         # Altitude sent to FC (may have noise)
     fix: int
     sats: int
     heading: float
+    truth_alt: float = None  # Ground truth altitude (before noise)
+    truth_accel: float = None  # Ground truth inertial acceleration (before sensor transform)
 
     def to_hitl_string(self) -> str:
         return (f"HITL/{self.timestamp:.3f},"
@@ -33,25 +36,65 @@ class DataSource:
 
 class PhysicsSim(DataSource):
     def __init__(self):
-        self.t = 0.0; self.alt = 0.0; self.vel = 0.0; self.dt = 0.02
+        self.t = 0.0
+        self.alt = 0.0
+        self.vel = 0.0
+        self.dt = 0.02
+        self.ignition_time = 2.0  # Motor ignites at t=2s
+        self.motor_burnout_time = self.ignition_time + 2.0  # 2 second burn
+        self.landed = False
+        self.landed_time = None
         print("[Sim] Using Internal Physics Engine")
+
+    def is_finished(self) -> bool:
+        # Stop simulation 2 seconds after landing
+        if self.landed and self.landed_time is not None:
+            return (self.t - self.landed_time) > 2.0
+        return False
+
     def get_next_packet(self) -> PacketData:
         self.t += self.dt
-        # Inertial acceleration (ENU frame, +Z is up)
-        accel_z = 30.0 if 2.0 < self.t < 4.0 else (-9.81 if self.alt > 0 else 0.0)
-        self.vel += accel_z * self.dt; self.alt += self.vel * self.dt
-        if self.alt < 0: self.alt, self.vel, accel_z = 0, 0, 0
 
-        # Accelerometer measures specific force = -(inertial_accel + gravity)
-        # ENU: gravity = -9.81, so specific_force_z = -inertial_accel - (-9.81) = -accel_z + 9.81
-        # At rest: -0 + 9.81 = +9.81 ❌ WAIT this is still wrong!
-        # Actually: specific_force = -(inertial_accel) + gravity_force
-        # gravity_force on accelerometer = -9.81 (downward)
-        # At rest: inertial=0, specific = 0 - 9.81 = -9.81 ✓
-        # Boost: inertial=30, specific = -30 - 9.81 = -39.81 ✓
+        # Before ignition: on pad
+        if self.t < self.ignition_time:
+            accel_z = 0.0
+            self.alt = 0.0
+            self.vel = 0.0
+        # Motor burn
+        elif self.t < self.motor_burnout_time:
+            accel_z = 30.0
+        # After burnout: free fall or on ground
+        else:
+            if self.alt > 0:
+                accel_z = -9.81
+            else:
+                accel_z = 0.0
+                self.vel = 0.0
+                self.alt = 0.0
+                if not self.landed:
+                    self.landed = True
+                    self.landed_time = self.t
+                    print(f"[Sim] Landed at t={self.t:.2f}s")
+
+        # Update dynamics
+        self.vel += accel_z * self.dt
+        self.alt += self.vel * self.dt
+
+        # Ground constraint
+        if self.alt < 0:
+            self.alt = 0.0
+            self.vel = 0.0
+            if not self.landed:
+                self.landed = True
+                self.landed_time = self.t
+                print(f"[Sim] Landed at t={self.t:.2f}s")
+
+        # Accelerometer measures specific force (not inertial acceleration)
         accel_measured = -accel_z - 9.81
+
         return PacketData(self.t, np.array([0., 0., accel_measured]), np.zeros(3), np.zeros(3),
-                          1013.25 - (self.alt * 0.12), 25.0, 45.0, -122.0, self.alt, 1, 8, 0.0)
+                          1013.25 - (self.alt * 0.12), 25.0, 45.0, -122.0, self.alt, 1, 8, 0.0,
+                          truth_alt=self.alt, truth_accel=accel_z)
 
 class CSVSim(DataSource):
     def __init__(self, filename):
@@ -75,9 +118,11 @@ class CSVSim(DataSource):
         with open(filename, 'r', encoding='utf-8-sig', errors='ignore') as f:
             lines = f.readlines()
         
-        header_index = -1; header_map = {}; converters = {} 
+        header_index = -1; header_map = {}; converters = {}
         keys = {'time': ['time', 'timestamp'], 'alt': ['altitude', 'pos_z', 'height', 'alt asl'],
-                'acc_z': ['acceleration z', 'accel z', 'az', 'vertical acc'], 'pres': ['pressure', 'baro'], 'temp': ['temperature', 'temp']}
+                'acc_z': ['acceleration z', 'accel z', 'az', 'vertical acc'],
+                'truth_acc_z': ['truth accel', 'true accel', 'inertial accel'],
+                'pres': ['pressure', 'baro', 'pres'], 'temp': ['temperature', 'temp']}
 
         for i, line in enumerate(lines):
             clean_parts = [p.lower().replace('#','').replace('"','').strip() for p in line.split(',')]
@@ -102,6 +147,24 @@ class CSVSim(DataSource):
         
         if header_index == -1: raise ValueError("Headers not found.")
 
+        # Detect OpenRocket format: check if first data row has near-zero acceleration
+        # OpenRocket reports inertial acceleration (gravity removed), so we need to add it back
+        is_openrocket = False
+        for i in range(header_index + 1, len(lines)):
+            line = lines[i].strip()
+            if not line or line.startswith('#'): continue
+            first_data_row = line.split(',')
+            try:
+                if 'acc_z' in header_map and header_map['acc_z'] < len(first_data_row):
+                    first_acc = converters['acc_z'](float(first_data_row[header_map['acc_z']].strip()))
+                    # OpenRocket starts at 0 inertial accel (at rest), so abs value should be < 1
+                    if abs(first_acc) < 1.0:
+                        is_openrocket = True
+                        print("[Sim] Detected OpenRocket format (inertial accel). Adding gravity to convert to specific force.")
+                break
+            except:
+                break
+
         count = 0
         for i in range(header_index + 1, len(lines)):
             line = lines[i].strip()
@@ -111,9 +174,16 @@ class CSVSim(DataSource):
                 def get_val(k, d=0.0):
                     return converters[k](float(row[header_map[k]].strip())) if k in header_map and header_map[k] < len(row) else d
                 sensor_z = get_val('acc_z')
-                if count < 5 and abs(sensor_z) < 2.0: sensor_z += 9.81 
+
+                # If OpenRocket format, add gravity to convert inertial accel -> specific force
+                if is_openrocket:
+                    sensor_z += 9.81
+
+                alt_val = get_val('alt')
+                truth_acc = get_val('truth_acc_z', 0.0)
                 self.data.append(PacketData(get_val('time'), np.array([0., 0., sensor_z]), np.zeros(3), np.zeros(3),
-                                          get_val('pres', 1013.25), get_val('temp', 25.0), 45.0, -122.0, get_val('alt'), 1, 8, 0.0))
+                                          get_val('pres', 1013.25), get_val('temp', 25.0), 45.0, -122.0, alt_val, 1, 8, 0.0,
+                                          truth_alt=alt_val, truth_accel=truth_acc))
                 count += 1
             except: continue
         print(f"[Sim] Successfully loaded {count} rows.")
@@ -133,5 +203,168 @@ class NetworkStreamSim(DataSource):
                 self.last_packet.timestamp = float(parts[0])
                 self.last_packet.accel = np.array([float(parts[1]), float(parts[2]), float(parts[3])])
                 self.last_packet.alt = float(parts[4])
-        except BlockingIOError: pass 
+        except BlockingIOError: pass
         return self.last_packet
+
+class PadDelaySim(DataSource):
+    """Wraps another DataSource and adds pad idle time before starting the simulation.
+    This allows the FC to settle and calibrate before flight begins."""
+
+    # Pad delay constant - time to hold on pad before starting sim
+    PAD_DELAY = 5.0  # seconds
+
+    def __init__(self, source: DataSource):
+        self.source = source
+        self.elapsed_time = 0.0
+        self.dt = 0.02  # Assume 50Hz
+        self.pad_packet = None  # Store first packet for repeating
+        self.pad_complete = False
+        print(f"[Sim] Adding {self.PAD_DELAY}s pad delay (allows FC to settle)")
+
+    def is_finished(self) -> bool:
+        return self.pad_complete and self.source.is_finished()
+
+    def get_next_packet(self) -> PacketData:
+        # During pad delay, repeat the first packet
+        if self.elapsed_time < self.PAD_DELAY:
+            if self.pad_packet is None:
+                # Get the first packet from source
+                self.pad_packet = self.source.get_next_packet()
+                # Adjust timestamp to 0
+                self.pad_packet.timestamp = 0.0
+
+            # Return a copy with updated timestamp
+            packet = PacketData(
+                timestamp=self.elapsed_time,
+                accel=self.pad_packet.accel.copy(),
+                gyro=self.pad_packet.gyro.copy(),
+                mag=self.pad_packet.mag.copy(),
+                pressure=self.pad_packet.pressure,
+                temp=self.pad_packet.temp,
+                lat=self.pad_packet.lat,
+                lon=self.pad_packet.lon,
+                alt=self.pad_packet.alt,
+                fix=self.pad_packet.fix,
+                sats=self.pad_packet.sats,
+                heading=self.pad_packet.heading,
+                truth_alt=self.pad_packet.truth_alt
+            )
+
+            self.elapsed_time += self.dt
+            return packet
+        else:
+            # Pad delay complete, pass through source packets with adjusted timestamp
+            self.pad_complete = True
+            # Don't print message - disrupts the simulation table flow
+
+            packet = self.source.get_next_packet()
+            packet.timestamp += self.PAD_DELAY
+            return packet
+
+class RotatedSim(DataSource):
+    """Wraps another DataSource and applies a 90-degree axis rotation to sensor data."""
+    def __init__(self, source: DataSource, rotation_deg=None):
+        self.source = source
+
+        if rotation_deg is None:
+            # Generate random 90-degree rotation (simulates different sensor mounting)
+            # Pick a random axis permutation (24 possible orientations)
+            rotations_90deg = [
+                (0, 0, 0),      # Identity (no rotation)
+                (90, 0, 0),     # X-axis rotations
+                (180, 0, 0),
+                (270, 0, 0),
+                (0, 90, 0),     # Y-axis rotations
+                (0, 180, 0),
+                (0, 270, 0),
+                (0, 0, 90),     # Z-axis rotations
+                (0, 0, 180),
+                (0, 0, 270),
+                (90, 90, 0),    # Two-axis combinations
+                (90, 270, 0),
+                (270, 90, 0),
+                (270, 270, 0),
+                (90, 0, 90),
+                (90, 0, 270),
+                (270, 0, 90),
+                (270, 0, 270),
+                (0, 90, 90),
+                (0, 90, 270),
+                (0, 270, 90),
+                (0, 270, 270),
+            ]
+
+            rotation_deg = rotations_90deg[np.random.randint(0, len(rotations_90deg))]
+            self.rotation = Rotation.from_euler('xyz', rotation_deg, degrees=True)
+
+            print(f"[Sim] Applying random 90° rotation: {rotation_deg}")
+        else:
+            # Use specified rotation
+            self.rotation = Rotation.from_euler('xyz', rotation_deg, degrees=True)
+            print(f"[Sim] Applying specified rotation: {rotation_deg}")
+
+    def is_finished(self) -> bool:
+        return self.source.is_finished()
+
+    def get_next_packet(self) -> PacketData:
+        packet = self.source.get_next_packet()
+
+        # Preserve ground truth altitude (rotation doesn't affect altitude)
+        if packet.truth_alt is None:
+            packet.truth_alt = packet.alt
+
+        # Rotate accelerometer data (specific force)
+        packet.accel = self.rotation.apply(packet.accel)
+
+        # Rotate gyroscope data (angular velocity)
+        packet.gyro = self.rotation.apply(packet.gyro)
+
+        # Rotate magnetometer data
+        packet.mag = self.rotation.apply(packet.mag)
+
+        return packet
+
+class NoisySim(DataSource):
+    """Wraps another DataSource and adds Gaussian noise to sensor data."""
+    def __init__(self, source: DataSource,
+                 accel_noise=0.05, gyro_noise=0.01, mag_noise=0.5, baro_noise=0.5):
+        """
+        Args:
+            source: DataSource to wrap
+            accel_noise: Accelerometer noise std dev (m/s²)
+            gyro_noise: Gyroscope noise std dev (rad/s)
+            mag_noise: Magnetometer noise std dev (uT)
+            baro_noise: Barometer noise std dev (hPa)
+        """
+        self.source = source
+        self.accel_noise = accel_noise
+        self.gyro_noise = gyro_noise
+        self.mag_noise = mag_noise
+        self.baro_noise = baro_noise
+
+        print(f"[Sim] Applying Gaussian noise:")
+        print(f"      Accel: {accel_noise:.3f} m/s², Gyro: {gyro_noise:.3f} rad/s")
+        print(f"      Mag: {mag_noise:.1f} uT, Baro: {baro_noise:.1f} hPa")
+
+    def is_finished(self) -> bool:
+        return self.source.is_finished()
+
+    def get_next_packet(self) -> PacketData:
+        packet = self.source.get_next_packet()
+
+        # Preserve ground truth altitude before adding noise
+        if packet.truth_alt is None:
+            packet.truth_alt = packet.alt
+
+        # Add Gaussian noise to each sensor
+        packet.accel += np.random.normal(0, self.accel_noise, 3)
+        packet.gyro += np.random.normal(0, self.gyro_noise, 3)
+        packet.mag += np.random.normal(0, self.mag_noise, 3)
+
+        # Add noise to pressure and convert to altitude
+        # Using standard barometric formula: alt = 44330 * (1 - (P/P0)^0.1903)
+        P0 = 1013.25  # Sea level pressure in hPa
+        packet.pressure += np.random.normal(0, self.baro_noise)
+        packet.alt = 44330.0 * (1.0 - (packet.pressure / P0) ** 0.1903)
+
+        return packet

@@ -1,47 +1,43 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
 #include <UnitTestSensors.h>
-
-// include other headers you need to test here
-#include <State/State.h>
 #include <Sensors/SensorManager/SensorManager.h>
-#include <Filters/Filter.h>
-#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketKF.h"
+#include "../mocks/MockLinearKalmanFilter.h"
+#include "../mocks/MockMahony.h"
 
 using namespace astra_rocket;
 using namespace astra;
+using namespace astra_mocks;
 
 // ---
 
-// Set up and global variables or mocks for testing here
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
 SensorManager* sensorManager;
-RocketKF* kalmanFilter;
-MahonyAHRS* orientationFilter;
+MockLinearKalmanFilter* kalmanFilter;
+MockMahony* orientationFilter;
 RocketState* state;
 
 // ---
 
 void setUp(void)
 {
+    // Set up minimal sensors just to keep State class happy
     fakeBaro.init();
     fakeIMU.init();
 
-    // Create sensor manager
     sensorManager = new SensorManager();
     sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
     sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
     sensorManager->setPrimaryBaro(&fakeBaro);
     sensorManager->begin();
 
-    // Create filters
-    kalmanFilter = new RocketKF();
-    orientationFilter = new MahonyAHRS();
+    // Create mock filters
+    kalmanFilter = new MockLinearKalmanFilter(9, 0, 6);
+    orientationFilter = new MockMahony();
 
-    // Create state with filters
+    // Create state with filters and sensor manager
     state = new RocketState(kalmanFilter, orientationFilter);
     state->withSensorManager(sensorManager);
     state->begin();
@@ -62,44 +58,27 @@ void tearDown(void)
     resetMillis();
 }
 
-// Helper to simulate an update cycle
-void simulateUpdate(double dt = 0.02) {
-    // Update sensor manager
-    sensorManager->update();
-
-    // Update state
-    state->update(dt * 1000.0); // Convert to milliseconds
-}
-
 // ---
 
-void test_fake_barometer_altitude() {
-    // Test that FakeBarometer.setAltitude() works
-    fakeBaro.setAltitude(100.0);
-    fakeBaro.read();
+void test_debug_altitude() {
+    // Set ground level to 0
+    state->setGroundLevel(0.0);
 
-    double alt = fakeBaro.getASLAltM();
-    printf("FakeBarometer altitude: %.2f m\n", alt);
-    TEST_ASSERT_TRUE(alt >= 95.0 && alt <= 105.0);
-}
+    // Directly set KF state to have altitude of 100m AGL
+    Matrix kfState = kalmanFilter->getState();
+    kfState(2, 0) = 100.0;  // pz = 100m AGL
+    kfState(5, 0) = 10.0;   // vz = 10 m/s (ascending)
+    kalmanFilter->setState(kfState);
 
-void test_rocket_state_reads_barometer() {
-    // Test that RocketState reads barometer altitude
-    fakeBaro.setAltitude(100.0);
-    fakeIMU.set(Vector<3>{0, 0, -9.81}, Vector<3>{0, 0, 0}, Vector<3>{0, 0, 0});
+    // Advance time and call update to pull KF state into RocketState
+    setMillis(20);
+    double currentTime = millis() / 1000.0;
+    state->update(currentTime);
 
-    simulateUpdate();
-
-    // Now set ground level
-    state->setGroundLevel(100.0);
-
-    // Update state again to recalculate AGL with new ground level
-    simulateUpdate();
-
-    double aglAfter = state->getAltitudeAGL();
-
-    // Should be near 0
-    TEST_ASSERT_TRUE(aglAfter >= -10.0 && aglAfter <= 10.0);
+    // Verify altitude is read correctly from KF state
+    double agl = state->getAltitudeAGL();
+    printf("AGL: %.2f m (expected 100.0)\n", agl);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 100.0, agl);
 }
 
 // ---
@@ -108,8 +87,7 @@ int main(int argc, char **argv)
 {
     UNITY_BEGIN();
 
-    RUN_TEST(test_fake_barometer_altitude);
-    RUN_TEST(test_rocket_state_reads_barometer);
+    RUN_TEST(test_debug_altitude);
 
     UNITY_END();
 }

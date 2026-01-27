@@ -12,7 +12,7 @@ using namespace astra;
 namespace astra_rocket
 {
 
-    RocketState::RocketState(Filter *filter, MahonyAHRS *orientationFilter)
+    RocketState::RocketState(LinearKalmanFilter *filter, MahonyAHRS *orientationFilter)
         : State(filter, orientationFilter),
           currentStage(PAD_IDLE),
           previousStage(PAD_IDLE),
@@ -22,9 +22,13 @@ namespace astra_rocket
           highAccelStartTime(0),
           lowAccelStartTime(0),
           lowVelocityStartTime(0),
+          drogueDetectStartTime(0),
+          mainDetectStartTime(0),
           highAccelDetected(false),
           lowAccelDetected(false),
-          lowVelocityDetected(false)
+          lowVelocityDetected(false),
+          drogueRateDetected(false),
+          mainRateDetected(false)
     {
         // Add rocket-specific columns to DataReporter
         insertColumn(0, "%d", &currentStage, "Flight Stage");
@@ -54,7 +58,7 @@ namespace astra_rocket
 
     void RocketState::update(double currentTimeSec)
     {
-        // Call parent implementation first - handles orientation filter updates
+        // Call parent implementation first - handles measurement update
         State::update(currentTimeSec);
 
         // Update time in current stage
@@ -102,8 +106,8 @@ namespace astra_rocket
         {
         case PAD_IDLE:
         {
-            // Detect liftoff: sustained high vertical acceleration
-            double accelMag = sensorManager->getAccel().magnitude();
+            // Detect liftoff: sustained high vertical acceleration from KF state
+            double accelMag = acceleration.magnitude();
             // Optional debug spam reduction
             // fprintf(stderr, "DEBUG RocketState: PAD_IDLE - accelMag=%0.3f\n", accelMag);
 
@@ -138,7 +142,7 @@ namespace astra_rocket
                         // We are currently in CALIBRATING mode (Pad Snapping).
                         // We must switch to CORRECTING to enable Gyro integration and allow
                         // the State::updateOrientation logic to manage High-G handling.
-                        ahrs->setMode(MahonyMode::CORRECTING);
+                        ahrs->setMode(MahonyMode::GYRO_ONLY);
                         LOGI("Orientation filter switched to CORRECTING mode for flight.");
                     }
                 }
@@ -151,23 +155,29 @@ namespace astra_rocket
         }
 
         case BOOST:
-            // Detect motor burnout: acceleration drops to or below threshold
-            if (sensorManager->getAccel().magnitude() <= BURNOUT_ACCEL_THRESHOLD)
+            // Detect motor burnout: earth-frame acceleration magnitude drops to or below threshold
+            // Use earth-frame acceleration (from State), not raw accelerometer reading
             {
-                if (!lowAccelDetected)
+                double earthAccelMag = acceleration.magnitude();
+
+                if (earthAccelMag <= BURNOUT_ACCEL_THRESHOLD)
                 {
-                    lowAccelStartTime = now;
-                    lowAccelDetected = true;
+                    if (!lowAccelDetected)
+                    {
+                        lowAccelStartTime = now;
+                        lowAccelDetected = true;
+                    }
+                    else if (now - lowAccelStartTime > BURNOUT_DURATION)
+                    {
+                        newStage = COAST;
+                        LOGI("MOTOR BURNOUT DETECTED at %0.2f m AGL, earth accel: %0.2f m/s²",
+                             position.z(), earthAccelMag);
+                    }
                 }
-                else if (now - lowAccelStartTime > BURNOUT_DURATION)
+                else
                 {
-                    newStage = COAST;
-                    LOGI("MOTOR BURNOUT DETECTED at %0.2f m AGL", position.z());
+                    lowAccelDetected = false;
                 }
-            }
-            else
-            {
-                lowAccelDetected = false;
             }
             break;
 
@@ -191,13 +201,24 @@ namespace astra_rocket
             break;
 
         case EXPECTING_DROGUE:
-            // Detect drogue deployment by change in descent rate
+            // Detect drogue deployment by sustained descent rate in valid range
             if (velocity.z() < -DROGUE_DESCENT_MIN && velocity.z() > -DROGUE_DESCENT_MAX)
             {
-                // Moderate descent rate suggests drogue is deployed
-                newStage = UNDER_DROGUE;
-                LOGI("UNDER DROGUE detected at %0.2f m AGL, descent rate: %0.2f m/s",
-                     position.z(), -velocity.z());
+                if (!drogueRateDetected)
+                {
+                    drogueDetectStartTime = now;
+                    drogueRateDetected = true;
+                }
+                else if (now - drogueDetectStartTime > DROGUE_DETECT_DURATION)
+                {
+                    newStage = UNDER_DROGUE;
+                    LOGI("UNDER DROGUE detected at %0.2f m AGL, descent rate: %0.2f m/s",
+                         position.z(), -velocity.z());
+                }
+            }
+            else
+            {
+                drogueRateDetected = false;
             }
             break;
 
@@ -211,12 +232,24 @@ namespace astra_rocket
             break;
 
         case EXPECTING_MAIN:
-            // Detect main deployment by significant reduction in descent rate
+            // Detect main deployment by sustained descent rate in valid range
             if (velocity.z() < -MAIN_DESCENT_MIN && velocity.z() > -MAIN_DESCENT_MAX)
             {
-                newStage = UNDER_MAIN;
-                LOGI("UNDER MAIN detected at %0.2f m AGL, descent rate: %0.2f m/s",
-                     position.z(), -velocity.z());
+                if (!mainRateDetected)
+                {
+                    mainDetectStartTime = now;
+                    mainRateDetected = true;
+                }
+                else if (now - mainDetectStartTime > MAIN_DETECT_DURATION)
+                {
+                    newStage = UNDER_MAIN;
+                    LOGI("UNDER MAIN detected at %0.2f m AGL, descent rate: %0.2f m/s",
+                         position.z(), -velocity.z());
+                }
+            }
+            else
+            {
+                mainRateDetected = false;
             }
             break;
 

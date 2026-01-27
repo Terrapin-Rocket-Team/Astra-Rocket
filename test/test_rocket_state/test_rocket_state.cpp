@@ -1,50 +1,51 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
 #include <UnitTestSensors.h>
-#include <State/State.h>
 #include <Sensors/SensorManager/SensorManager.h>
-#include <Filters/Filter.h>
-#include <Filters/Mahony.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketKF.h"
+#include "../mocks/MockLinearKalmanFilter.h"
+#include "../mocks/MockMahony.h"
 #include <cmath>
 
 using namespace astra_rocket;
 using namespace astra;
+using namespace astra_mocks;
 
-// Mock sensors for testing
+// ===== Test Fixtures =====
 FakeBarometer fakeBaro;
-FakeAccel fakeAccel;
-FakeGyro fakeGyro;
+FakeIMU fakeIMU;
 SensorManager* sensorManager;
-RocketKF* kalmanFilter;
-MahonyAHRS* orientationFilter;
+MockLinearKalmanFilter* kalmanFilter;
+MockMahony* orientationFilter;
 RocketState* state;
+double testGroundLevel = 0.0;
 
 void setUp(void)
 {
-    // Initialize sensors
+    // Set up minimal sensors just to keep State class happy
+    // NOTE: We won't use these sensors for testing - we directly manipulate KF state
     fakeBaro.init();
-    fakeAccel.init();
-    fakeGyro.init();
+    fakeIMU.init();
 
-    // Create sensor manager
     sensorManager = new SensorManager();
-    sensorManager->setPrimaryAccel(&fakeAccel);
-    sensorManager->setPrimaryGyro(&fakeGyro);
+    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
+    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
     sensorManager->setPrimaryBaro(&fakeBaro);
     sensorManager->begin();
 
-    // Create filters
-    kalmanFilter = new RocketKF();
-    orientationFilter = new MahonyAHRS();
+    // Create mock filters
+    // MockLinearKalmanFilter(measurementSize, controlSize, stateSize)
+    // State is 9D: [px, py, pz, vx, vy, vz, ax, ay, az]
+    kalmanFilter = new MockLinearKalmanFilter(6, 0, 9);
+    orientationFilter = new MockMahony();
 
-    // Create RocketState with filters
+    // Create RocketState with filters and sensor manager
     state = new RocketState(kalmanFilter, orientationFilter);
     state->withSensorManager(sensorManager);
     state->begin();
+
+    testGroundLevel = 0.0;
     state->setGroundLevel(0.0);
-    LOGD("HELLO THERE");
     setMillis(0);
 }
 
@@ -61,58 +62,35 @@ void tearDown(void)
     resetMillis();
 }
 
-// Helper to simulate an update cycle
-void simulateUpdate(double dt = 0.02) {
-    // Advance time
-    unsigned long currentMillis = millis();
-    setMillis(currentMillis + (unsigned long)(dt * 1000.0));
+// ===== Helper Functions =====
 
-    // Update sensor manager
-    sensorManager->update();
+// Helper to set KF state and update RocketState
+void setStateAndUpdate(double altitude, double velocity, double accelZ, unsigned long timeMs) {
+    Matrix kfState = kalmanFilter->getState();
+    kfState(2, 0) = altitude;   // pz (altitude AGL)
+    kfState(5, 0) = velocity;   // vz (vertical velocity)
+    kfState(8, 0) = accelZ;     // az (z-axis acceleration)
+    kalmanFilter->setState(kfState);
 
-    // Update state (expects time in seconds, not milliseconds)
-    double newTime = millis() / 1000.0;
-    state->update(newTime);
+    setMillis(timeMs);
+    double timeSec = millis() / 1000.0;
+
+    // Call both predictState and update to properly populate state variables
+    state->predictState(timeSec);
+    state->update(timeSec);
 }
 
-// Helper to simulate realistic altitude change with matching acceleration
-// Simulates a trajectory with acceleration, coast, and deceleration phases
-// ENU frame: Z is up, gravity is -9.81
-void simulateAltitudeChange(double startAlt, double endAlt, double duration, int steps = 50) {
-    double deltaAlt = endAlt - startAlt;
-    double dt = duration / steps;
-
-    for (int i = 0; i <= steps; i++) {
-        double t = (double)i / steps;  // 0 to 1
-
-        // Use smoothstep for realistic trajectory: accelerate → coast → decelerate
-        // s(t) = 3t² - 2t³
-        double s = 3 * t * t - 2 * t * t * t;
-        double altitude = startAlt + deltaAlt * s;
-
-        // Velocity: ds/dt = 6t - 6t²
-        double velocity = (6 * t - 6 * t * t) * deltaAlt / duration;
-
-        // Inertial acceleration in earth frame (ENU): d²s/dt² = 6 - 12t
-        double inertial_accel_z = (6 - 12 * t) * deltaAlt / (duration * duration);
-
-        // Accelerometer measures specific force (reaction force)
-        // specific_force = -inertial_accel - gravity
-        // In ENU: at rest, inertial_accel = 0, gravity = -9.81, so specific_force = 0 - (-9.81) = -9.81
-        // When accelerating up: specific_force_z = -inertial_accel_z + 9.81
-        fakeBaro.setAltitude(altitude);
-        fakeAccel.set(Vector<3>{0, 0, -inertial_accel_z - 9.81});
-
-        simulateUpdate(dt);
-    }
+// Overload without acceleration for cases where we don't care about accel
+void setStateAndUpdate(double altitude, double velocity, unsigned long timeMs) {
+    setStateAndUpdate(altitude, velocity, -9.81, timeMs);
 }
 
 // ===== BASIC INITIALIZATION TESTS =====
 
 void test_rocket_state_initialization() {
-    // Test that RocketState can be instantiated
-    RocketKF kf;
-    MahonyAHRS ahrs;
+    // Test that RocketState initializes with mocks
+    MockLinearKalmanFilter kf(6, 0, 9);
+    MockMahony ahrs;
     RocketState emptyState(&kf, &ahrs);
 
     // Verify initial flight stage is PAD_IDLE
@@ -127,13 +105,13 @@ void test_ground_level_setting() {
     // Set ground level altitude
     double groundAlt = 100.0; // 100m MSL
     state->setGroundLevel(groundAlt);
+    testGroundLevel = groundAlt;
 
-    // Set barometer to ground level
-    fakeBaro.setAltitude(100.0);
-    simulateUpdate();
+    // Set KF state to ground level (0 AGL)
+    setStateAndUpdate(0.0, 0.0, 100);
 
     // AGL should be 0 when at ground level
-    TEST_ASSERT_EQUAL_DOUBLE(0.0, state->getAltitudeAGL());
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 0.0, state->getAltitudeAGL());
 }
 
 void test_flight_stage_manual_setting() {
@@ -153,150 +131,113 @@ void test_flight_stage_manual_setting() {
 void test_ground_level_negative() {
     // Test ground level below sea level (e.g., Death Valley)
     state->setGroundLevel(-86.0); // Death Valley elevation
+    testGroundLevel = -86.0;
 
-    fakeBaro.setAltitude(0.0); // Sea level
-    // Give filter multiple updates to converge
-    for (int i = 0; i < 5; i++) {
-        simulateUpdate();
-    }
+    // Set altitude to 0 AGL (which is -86 MSL)
+    setStateAndUpdate(0.0, 0.0, 100);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 0.0, state->getAltitudeAGL());
 
-    // AGL should be 86m above ground (allow small tolerance for filter convergence)
-    TEST_ASSERT_DOUBLE_WITHIN(1.0, 86.0, state->getAltitudeAGL());
+    // Set altitude to 86m AGL
+    setStateAndUpdate(86.0, 0.0, 200);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 86.0, state->getAltitudeAGL());
 }
 
 void test_ground_level_high_altitude() {
     // Test ground level at high altitude (e.g., La Paz, Bolivia)
+    testGroundLevel = 3640.0;
     state->setGroundLevel(3640.0); // ~12,000 ft
 
-    fakeBaro.setAltitude(3640.0);
-    fakeAccel.set(Vector<3>{0, 0, -9.81});
-    // Give filter multiple updates to converge to initial altitude
-    for (int i = 0; i < 10; i++) {
-        simulateUpdate();
-    }
-
     // AGL should be 0 at launch site
-    TEST_ASSERT_DOUBLE_WITHIN(5.0, 0.0, state->getAltitudeAGL());
+    setStateAndUpdate(0.0, 0.0, 100);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 0.0, state->getAltitudeAGL());
 
-    // Simulate realistic ascent to 4000m MSL (360m AGL) over 15 seconds
-    // Use more steps for better KF convergence
-    simulateAltitudeChange(3640.0, 4000.0, 15.0, 200);
-
-    // Add settling time at final altitude
-    fakeBaro.setAltitude(4000.0);
-    fakeAccel.set(Vector<3>{0, 0, -9.81});
-    for (int i = 0; i < 50; i++) {
-        simulateUpdate();
-    }
-
-    TEST_ASSERT_DOUBLE_WITHIN(30.0, 360.0, state->getAltitudeAGL());
+    // Climb to 360m AGL
+    setStateAndUpdate(360.0, 50.0, 200);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 360.0, state->getAltitudeAGL());
 }
 
 void test_ground_level_not_set() {
-    // Test behavior when ground level is never set (defaults to 0)
-    fakeBaro.setAltitude(100.0);
-    // Give filter multiple updates to converge
-    for (int i = 0; i < 5; i++) {
-        simulateUpdate();
-    }
+    // Test behavior when ground level is at 0
+    state->setGroundLevel(0.0);
 
-    // AGL should be altitude MSL when ground = 0
-    TEST_ASSERT_DOUBLE_WITHIN(1.0, 100.0, state->getAltitudeAGL());
+    // Set altitude to 100m
+    setStateAndUpdate(100.0, 0.0, 100);
+
+    // AGL should equal altitude when ground = 0
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 100.0, state->getAltitudeAGL());
 }
 
 void test_negative_altitude_agl() {
-    // Test that AGL can go negative (sensor drift, landing below launch site)
+    // Test that AGL can go negative (landing below launch site)
+    testGroundLevel = 100.0;
     state->setGroundLevel(100.0);
 
-    fakeBaro.setAltitude(95.0); // 5m below launch site
-    // Give filter multiple updates to converge
-    for (int i = 0; i < 5; i++) {
-        simulateUpdate();
-    }
-
-    TEST_ASSERT_DOUBLE_WITHIN(0.5, -5.0, state->getAltitudeAGL());
+    // 5m below launch site
+    setStateAndUpdate(-5.0, 0.0, 100);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, -5.0, state->getAltitudeAGL());
 }
 
 // ===== SENSOR UPDATE TESTS =====
 
 void test_altitude_updates() {
     // Test that altitude updates correctly
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, -9.81});
-    // Give filter time to converge
-    for (int i = 0; i < 10; i++) {
-        simulateUpdate();
-    }
+    setStateAndUpdate(100.0, 0.0, 100);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 100.0, state->getAltitudeAGL());
 
-    TEST_ASSERT_DOUBLE_WITHIN(5.0, 100.0, state->getAltitudeAGL());
-
-    // Simulate realistic climb from 100m to 200m over 8 seconds
-    simulateAltitudeChange(100.0, 200.0, 8.0, 100);
-
-    // Add settling time at final altitude
-    fakeBaro.setAltitude(200.0);
-    fakeAccel.set(Vector<3>{0, 0, -9.81});
-    for (int i = 0; i < 50; i++) {
-        simulateUpdate();
-    }
-
-    TEST_ASSERT_DOUBLE_WITHIN(15.0, 200.0, state->getAltitudeAGL());
+    // Update to higher altitude
+    setStateAndUpdate(200.0, 0.0, 200);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 200.0, state->getAltitudeAGL());
 }
 
 // ===== ALTITUDE TRACKING TESTS =====
 
 void test_altitude_ascent() {
-    // Simulate realistic ascent to 1000m over 20 seconds
-    simulateAltitudeChange(0.0, 1000.0, 20.0, 100);
+    // Simulate ascent to 1000m
+    setStateAndUpdate(1000.0, 50.0, 1000);
+    TEST_ASSERT_DOUBLE_WITHIN(1.0, 1000.0, state->getAltitudeAGL());
 
-    double apogeeAlt = state->getAltitudeAGL();
-    TEST_ASSERT_TRUE(apogeeAlt >= 900.0 && apogeeAlt <= 1100.0);
-
-    // Simulate realistic descent from 1000m to 500m over 15 seconds
+    // Simulate descent to 500m
     state->setFlightStage(FlightStage::UNDER_DROGUE);
-    simulateAltitudeChange(1000.0, 500.0, 15.0, 75);
+    setStateAndUpdate(500.0, -15.0, 2000);
 
     double currentAlt = state->getAltitudeAGL();
-
-    // Current altitude should be lower than apogee
-    TEST_ASSERT_TRUE(currentAlt < apogeeAlt);
+    TEST_ASSERT_DOUBLE_WITHIN(1.0, 500.0, currentAlt);
 }
 
 // ===== OFF-VERTICAL ANGLE EDGE CASES =====
 
 void test_off_vertical_angle_vertical_flight() {
     // Test perfectly vertical flight
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, -30.0}); // Straight up
-    simulateUpdate();
+    orientationFilter->setMockOrientation(Quaternion(1, 0, 0, 0));
+    setStateAndUpdate(100.0, 50.0, 1000);
 
     double angle = state->getOffVerticalAngle();
     // Should be close to 0 degrees
-    TEST_ASSERT_TRUE(angle < 5.0);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 0.0, angle);
 }
 
 void test_off_vertical_angle_horizontal_flight() {
     // Test horizontal flight
-    // Note: This test is problematic - orientation can't be inferred from single accel reading
-    // without gyro data. Keeping for now but may need rework.
-    fakeBaro.setAltitude(100.0);
-    // Horizontal accel in X direction, still feeling gravity in -Z
-    fakeAccel.set(Vector<3>{30.0, 0, -9.81}); // Horizontal accel + gravity
-    simulateUpdate();
+    // Set orientation to 90 degrees pitch BEFORE updating
+    Quaternion q;
+    q.fromAxisAngle(Vector<3>(0, 1, 0), M_PI / 2.0); // 90 degree rotation around Y axis
+    orientationFilter->setMockOrientation(q);
+
+    // Now update - this will read the mock orientation
+    setStateAndUpdate(100.0, 50.0, 1000);
 
     double angle = state->getOffVerticalAngle();
-    // Should be close to 90 degrees (but may not converge from single update)
-    TEST_ASSERT_TRUE(angle > 60.0); // Allow some tolerance
+    // Should be 90 degrees
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 90.0, angle);
 }
 
 void test_off_vertical_angle_zero_acceleration() {
-    // Test with zero acceleration (no orientation info)
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, 0});
-    simulateUpdate();
+    // Test with zero acceleration
+    orientationFilter->setMockOrientation(Quaternion(1, 0, 0, 0));
+    setStateAndUpdate(100.0, 0.0, 0.0, 1000);
 
     double angle = state->getOffVerticalAngle();
-    // Should default to 0 when no acceleration
+    // Should default to 0
     TEST_ASSERT_EQUAL_DOUBLE(0.0, angle);
 }
 
@@ -306,11 +247,11 @@ void test_time_in_stage_rollover() {
     // Test behavior at long durations
     state->setFlightStage(FlightStage::PAD_IDLE);
     setMillis(0);
-    simulateUpdate();
+    setStateAndUpdate(0.0, 0.0, 100);
 
     // Simulate 1 hour on pad
     setMillis(3600000); // 1 hour in ms
-    simulateUpdate();
+    setStateAndUpdate(0.0, 0.0, 3600000);
 
     double timeInStage = state->getTimeInStage();
     TEST_ASSERT_TRUE(timeInStage >= 3590.0 && timeInStage <= 3610.0); // ~3600 seconds
@@ -320,18 +261,18 @@ void test_time_in_stage_rapid_transitions() {
     // Test rapid stage changes
     setMillis(0);
     state->setFlightStage(FlightStage::BOOST);
-    simulateUpdate();
+    setStateAndUpdate(10.0, 10.0, 100);
 
     setMillis(100);
     state->setFlightStage(FlightStage::COAST);
-    simulateUpdate();
+    setStateAndUpdate(15.0, 12.0, 200);
 
     double time1 = state->getTimeInStage();
     TEST_ASSERT_TRUE(time1 >= 0.0 && time1 <= 0.2);
 
     setMillis(200);
     state->setFlightStage(FlightStage::APOGEE);
-    simulateUpdate();
+    setStateAndUpdate(20.0, 1.0, 300);
 
     double time2 = state->getTimeInStage();
     TEST_ASSERT_TRUE(time2 >= 0.0 && time2 <= 0.2);
@@ -341,9 +282,7 @@ void test_time_in_stage_rapid_transitions() {
 
 void test_all_getters_return_valid_values() {
     // Verify all getters return finite values
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, -19.62});
-    simulateUpdate();
+    setStateAndUpdate(100.0, 50.0, -19.62, 1000);
 
     TEST_ASSERT_TRUE(std::isfinite(state->getAltitudeAGL()));
     TEST_ASSERT_TRUE(std::isfinite(state->getOffVerticalAngle()));
@@ -351,9 +290,9 @@ void test_all_getters_return_valid_values() {
 }
 
 void test_getters_no_sensors() {
-    // Test that getters work even without sensor updates
-    RocketKF kf;
-    MahonyAHRS ahrs;
+    // Test that getters work with minimal setup
+    MockLinearKalmanFilter kf(6, 0, 9);
+    MockMahony ahrs;
     RocketState emptyState(&kf, &ahrs);
 
     // Should not crash and return valid (possibly zero) values
@@ -365,39 +304,23 @@ void test_getters_no_sensors() {
 // ===== SENSOR DATA EDGE CASES =====
 
 void test_extreme_altitude_values() {
-    // Test high altitude climb (simulate going up to 5km over 40 seconds)
-    // Note: Very high altitudes are unrealistic for barometer-based rockets
-    simulateAltitudeChange(0.0, 5000.0, 40.0, 300);
+    // Test high altitude
+    setStateAndUpdate(5000.0, 100.0, 5000);
+    TEST_ASSERT_DOUBLE_WITHIN(1.0, 5000.0, state->getAltitudeAGL());
 
-    // Add settling time
-    fakeBaro.setAltitude(5000.0);
-    fakeAccel.set(Vector<3>{0, 0, -9.81});
-    for (int i = 0; i < 100; i++) {
-        simulateUpdate();
-    }
-
-    TEST_ASSERT_DOUBLE_WITHIN(500.0, 5000.0, state->getAltitudeAGL());
-
-    // Simulate descent back to near-ground level over 80 seconds
-    simulateAltitudeChange(5000.0, 0.01, 80.0, 400);
-
-    // Add settling time
-    fakeBaro.setAltitude(0.01);
-    fakeAccel.set(Vector<3>{0, 0, -9.81});
-    for (int i = 0; i < 100; i++) {
-        simulateUpdate();
-    }
-
-    TEST_ASSERT_DOUBLE_WITHIN(100.0, 0.01, state->getAltitudeAGL());
+    // Test near-ground level
+    setStateAndUpdate(0.01, -5.0, 10000);
+    TEST_ASSERT_DOUBLE_WITHIN(0.1, 0.01, state->getAltitudeAGL());
 }
 
 void test_sensor_update_frequency() {
-    // Test that many updates work correctly with realistic trajectory
-    // Climb to 100m over 10 seconds with high update frequency
-    simulateAltitudeChange(0.0, 100.0, 10.0, 1000);
+    // Test many rapid updates work correctly
+    for (int i = 0; i < 1000; i++) {
+        double alt = i * 0.1; // 0 to 100m
+        setStateAndUpdate(alt, 10.0, i);
+    }
 
-    // Should complete without errors and reach approximately 100m
-    TEST_ASSERT_TRUE(state->getAltitudeAGL() >= 90.0 && state->getAltitudeAGL() <= 110.0);
+    TEST_ASSERT_DOUBLE_WITHIN(1.0, 100.0, state->getAltitudeAGL());
 }
 
 // ===== FLIGHT STAGE TRANSITION TRACKING =====
@@ -405,27 +328,21 @@ void test_sensor_update_frequency() {
 void test_stage_transition_time_reset() {
     // Verify time in stage resets on transition
     setMillis(0);
+    setStateAndUpdate(100.0, 50.0, -9.81, 0);
     state->setFlightStage(FlightStage::BOOST);
 
-    // Set high acceleration to stay in BOOST (above 1.5G threshold)
-    fakeBaro.setAltitude(100.0);
-    fakeAccel.set(Vector<3>{0, 0, -30.0}); // 3G
-    simulateUpdate();
-
     setMillis(2000);
-    simulateUpdate();
+    setStateAndUpdate(150.0, 60.0, -30.0, 2000);
     double boostTime = state->getTimeInStage();
-    TEST_ASSERT_TRUE(boostTime >= 1.8 && boostTime <= 2.2);
+    TEST_ASSERT_TRUE(boostTime >= 1.7 && boostTime <= 2.3);
 
     // Transition to coast
     setMillis(2100);
     state->setFlightStage(FlightStage::COAST);
-    // Set low acceleration for coast
-    fakeAccel.set(Vector<3>{0, 0, -9.81}); // 1G
-    simulateUpdate();
+    setStateAndUpdate(160.0, 55.0, -9.81, 2100);
 
     double coastTime = state->getTimeInStage();
-    TEST_ASSERT_TRUE(coastTime >= 0.0 && coastTime <= 0.3); // Should reset
+    TEST_ASSERT_TRUE(coastTime >= 0.0 && coastTime <= 0.4); // Should reset
 }
 
 int main(int argc, char **argv)

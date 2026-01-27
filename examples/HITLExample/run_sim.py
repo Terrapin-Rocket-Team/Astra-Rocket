@@ -4,8 +4,39 @@ import sys
 import datetime
 import csv
 import matplotlib.pyplot as plt
+import subprocess
+import os
 import astra_link
 import astra_sim
+
+# Terminal colors
+class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    GRAY = '\033[90m'
+    BRIGHT_YELLOW = '\033[93m'
+    BRIGHT_CYAN = '\033[96m'
+    BRIGHT_MAGENTA = '\033[95m'
+
+# Flight stage names and colors for visualization
+STAGE_NAMES = {
+    0: ('PAD_IDLE', 'gray', Colors.GRAY),
+    1: ('BOOST', 'red', Colors.FAIL),
+    2: ('COAST', 'orange', Colors.WARNING),
+    3: ('APOGEE', 'purple', Colors.BRIGHT_MAGENTA),
+    4: ('EXPECTING_DROGUE', 'brown', Colors.WARNING),
+    5: ('UNDER_DROGUE', 'blue', Colors.OKBLUE),
+    6: ('EXPECTING_MAIN', 'cyan', Colors.BRIGHT_CYAN),
+    7: ('UNDER_MAIN', 'green', Colors.OKGREEN),
+    8: ('LANDED', 'black', Colors.GRAY)
+}
 
 def parse_telem_header(header_line):
     """Parses 'TELEM/Time,Alt,...' into a map and a list"""
@@ -16,7 +47,30 @@ def parse_telem_header(header_line):
     return col_map, parts
 
 def main():
-    parser = argparse.ArgumentParser(description="Astra Rocket Handshake Sim")
+    parser = argparse.ArgumentParser(
+        description="Astra Rocket Handshake Sim",
+        epilog="""
+Examples:
+  # Basic SITL with CSV data (auto-starts SITL executable)
+  python run_sim.py --mode sitl --source csv --file flight.csv
+
+  # SITL with custom executable path
+  python run_sim.py --mode sitl --source csv --file flight.csv --sitl-exe path/to/program.exe
+
+  # SITL without auto-start (start SITL executable manually)
+  python run_sim.py --mode sitl --source physics --no-auto-start
+
+  # HITL with random rotation (simulates tilted rail)
+  python run_sim.py --mode hitl --port COM3 --source csv --file flight.csv --rotate
+
+  # With specific rotation and noise
+  python run_sim.py --mode sitl --source physics --rotation 0 10 45 --noise
+
+  # Custom noise levels for realistic hardware simulation
+  python run_sim.py --mode sitl --source csv --file flight.csv --noise --accel-noise 0.1 --baro-noise 1.0
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('--mode', choices=['hitl', 'sitl'], required=True, help="Connection mode")
     parser.add_argument('--source', choices=['physics', 'csv', 'net'], default='physics', help="Data source")
     parser.add_argument('--port', help="Serial port (HITL)")
@@ -26,73 +80,188 @@ def main():
     parser.add_argument('--file', help="CSV file path")
     parser.add_argument('--udp-port', type=int, default=9000, help="External UDP port")
 
+    # SITL executable options
+    parser.add_argument('--sitl-exe', help="Path to SITL executable (default: .pio/build/native/program.exe)")
+    parser.add_argument('--no-auto-start', action='store_true', help="Don't auto-start SITL executable (manual start required)")
+
+    # Sensor simulation options
+    parser.add_argument('--rotate', action='store_true', help="Apply random rotation to sensor data (simulates tilted rail)")
+    parser.add_argument('--rotation', type=float, nargs=3, metavar=('ROLL', 'PITCH', 'YAW'),
+                       help="Apply specific rotation in degrees (e.g., --rotation 0 10 45)")
+    parser.add_argument('--noise', action='store_true', help="Add Gaussian noise to sensor data")
+    parser.add_argument('--accel-noise', type=float, default=0.05, help="Accelerometer noise std dev (m/s²), default=0.05")
+    parser.add_argument('--gyro-noise', type=float, default=0.01, help="Gyroscope noise std dev (rad/s), default=0.01")
+    parser.add_argument('--mag-noise', type=float, default=0.5, help="Magnetometer noise std dev (uT), default=0.5")
+    parser.add_argument('--baro-noise', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
+
     args = parser.parse_args()
 
-    # --- 1. Setup Link ---
+    # --- 1. Start SITL Executable (if needed) ---
+    sitl_process = None
+    if args.mode == 'sitl' and not args.no_auto_start:
+        # Determine SITL executable path
+        if args.sitl_exe:
+            sitl_exe_path = args.sitl_exe
+        else:
+            # Default path relative to script location
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+            sitl_exe_path = os.path.join(project_root, '.pio', 'build', 'native', 'program.exe')
+
+        # Check if executable exists
+        if os.path.exists(sitl_exe_path):
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Starting executable: {Colors.BOLD}{sitl_exe_path}{Colors.ENDC}")
+            try:
+                sitl_process = subprocess.Popen(
+                    [sitl_exe_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0
+                )
+                print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process started (PID: {Colors.BOLD}{sitl_process.pid}{Colors.ENDC})")
+                # Give it a moment to start up
+                time.sleep(1.0)
+            except Exception as e:
+                print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Warning: Could not start executable: {e}")
+                print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Please start the SITL executable manually")
+        else:
+            print(f"{Colors.FAIL}[SITL]{Colors.ENDC} Executable not found at: {sitl_exe_path}")
+            print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Please build the project or specify --sitl-exe")
+            print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Or use --no-auto-start to start SITL manually")
+
+    # --- 2. Setup Link ---
     try:
         if args.mode == 'hitl':
             if not args.port: raise ValueError("--port required for HITL")
+            print(f"{Colors.OKCYAN}[Link]{Colors.ENDC} Connecting to HITL on {Colors.BOLD}{args.port}{Colors.ENDC} @ {args.baud} baud...")
             link = astra_link.SerialLink(args.port, args.baud)
+            print(f"{Colors.OKGREEN}[Link]{Colors.ENDC} Connected!")
         else:
+            print(f"{Colors.OKCYAN}[Link]{Colors.ENDC} Connecting to SITL on {Colors.BOLD}{args.host}:{args.tcp_port}{Colors.ENDC}...")
             link = astra_link.TCPLink(args.host, args.tcp_port)
+            print(f"{Colors.OKGREEN}[Link]{Colors.ENDC} Connected!")
     except Exception as e:
-        print(f"Connection Failed: {e}")
+        print(f"{Colors.FAIL}Connection Failed: {e}{Colors.ENDC}")
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            sitl_process.wait()
         sys.exit(1)
 
-    # --- 2. Setup Source ---
+    # --- 3. Setup Source ---
     try:
         if args.source == 'csv':
             if not args.file: raise ValueError("--file required for CSV mode")
-            sim = astra_sim.CSVSim(args.file)
+            print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Loading CSV file: {Colors.BOLD}{args.file}{Colors.ENDC}")
+            base_sim = astra_sim.CSVSim(args.file)
         elif args.source == 'net':
-            sim = astra_sim.NetworkStreamSim(args.udp_port)
+            print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Starting Network Stream on port {Colors.BOLD}{args.udp_port}{Colors.ENDC}")
+            base_sim = astra_sim.NetworkStreamSim(args.udp_port)
         else:
-            sim = astra_sim.PhysicsSim()
+            print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Starting Physics Simulation")
+            base_sim = astra_sim.PhysicsSim()
+
+        # Always apply pad delay (allows FC to settle before flight)
+        sim = astra_sim.PadDelaySim(base_sim)
+
+        # Apply rotation wrapper if requested
+        if args.rotate:
+            print(f"{Colors.BRIGHT_CYAN}[Sim]{Colors.ENDC} Applying random rotation")
+            sim = astra_sim.RotatedSim(sim)
+        elif args.rotation:
+            print(f"{Colors.BRIGHT_CYAN}[Sim]{Colors.ENDC} Applying rotation: {args.rotation}")
+            sim = astra_sim.RotatedSim(sim, rotation_deg=args.rotation)
+
+        # Apply noise wrapper if requested
+        if args.noise:
+            print(f"{Colors.BRIGHT_CYAN}[Sim]{Colors.ENDC} Adding sensor noise (accel={args.accel_noise}, gyro={args.gyro_noise}, mag={args.mag_noise}, baro={args.baro_noise})")
+            sim = astra_sim.NoisySim(sim,
+                                     accel_noise=args.accel_noise,
+                                     gyro_noise=args.gyro_noise,
+                                     mag_noise=args.mag_noise,
+                                     baro_noise=args.baro_noise)
+
+        print(f"{Colors.OKGREEN}[Sim]{Colors.ENDC} Simulation source ready!")
+
     except Exception as e:
-        print(f"Sim Setup Failed: {e}")
+        print(f"{Colors.FAIL}Sim Setup Failed: {e}{Colors.ENDC}")
         link.close()
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            sitl_process.wait()
         sys.exit(1)
 
-    # --- 3. Handshake Phase ---
-    print("\n[Init] Waiting for Flight Computer Header...")
-    print("       (Please reset/boot the Flight Computer now)")
+    # --- 4. Handshake Phase ---
+    print(f"\n{Colors.OKCYAN}[Init]{Colors.ENDC} Waiting for Flight Computer Header...")
+    if not sitl_process:
+        print(f"       {Colors.GRAY}(Please reset/boot the Flight Computer now){Colors.ENDC}")
 
     fc_col_map = None
     fc_header_names = []
 
-    # Wait indefinitely for the header
+    # Wait for the header (with Ctrl+C support)
     try:
         while True:
             line = link.read_line()
             if line and line.startswith("TELEM/") and ("State" in line or "Time" in line):
                 fc_col_map, fc_header_names = parse_telem_header(line)
-                print(f"[Init] Header Received! Found {len(fc_header_names)} columns.")
-                print(f"[Init] Columns: {fc_header_names}")
+                if fc_header_names:
+                    print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Header Received! Found {Colors.BOLD}{len(fc_header_names)}{Colors.ENDC} columns.")
+                    print(f"{Colors.GRAY}[Init]{Colors.ENDC} Columns: {fc_header_names}")
                 break
-            time.sleep(0.01)
-    except ConnectionError as e:
-        print(f"\n[Error] Connection died during handshake: {e}")
+            time.sleep(0.01)  # Small sleep allows Ctrl+C to be detected
+    except KeyboardInterrupt:
+        print(f"\n{Colors.WARNING}[Init]{Colors.ENDC} Interrupted by user during handshake.")
         link.close()
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            sitl_process.wait()
+        sys.exit(0)
+    except ConnectionError as e:
+        print(f"\n{Colors.FAIL}[Error]{Colors.ENDC} Connection died during handshake: {e}")
+        link.close()
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            sitl_process.wait()
         sys.exit(1)
 
-    print("[Init] Handshake Complete. Starting Simulation in 1s...")
+    print(f"{Colors.OKGREEN}[Init]{Colors.ENDC} Handshake Complete. Starting Simulation in 1s...")
     time.sleep(1.0)
 
-    # --- 4. Main Loop ---
-    print("\nStarting LOCK-STEP Simulation")
-    print(f"{'SimT':<6} | {'SimAlt':<8} | {'FC State':<12} | {'FC Alt':<8} | {'Events'}")
-    print("-" * 65)
+    # --- 5. Main Loop ---
+    print(f"\n{Colors.BOLD}{Colors.HEADER}╔═══════════════════════════════════════════════════════════════╗{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}║          Starting LOCK-STEP Simulation                        ║{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}╚═══════════════════════════════════════════════════════════════╝{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}{Colors.OKCYAN}{'Time (s)':<9} | {'SimAlt':<8} | {'FC Alt':<8} | {'Events':<30}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.OKCYAN}{'-'*9}-+-{'-'*8}-+-{'-'*8}-+-{'-'*30}{Colors.ENDC}")
 
-    history = {'time': [], 'sim_alt': [], 'fc_alt': [], 'fc_stage': [], 'fc_values': []}
+    history = {
+        'time': [],
+        'sim_alt': [],           # Ground truth altitude
+        'sensor_alt': [],        # Altitude from pressure sensor (with noise if enabled)
+        'fc_alt': [],            # KF estimate from flight computer
+        'fc_stage': [],
+        'fc_values': [],
+        'truth_accel': [],       # Ground truth acceleration (from sim)
+        'sensor_accel': [],      # Measured acceleration (from accel sensor)
+        'fc_accel': []           # KF estimated acceleration
+    }
     last_stage = "BOOT"
     pkt_count = 0
     
     connection_alive = True
+    sim_source_name = args.source.upper()
+    if args.source == 'csv' and args.file:
+        sim_source_name = f"CSV ({os.path.basename(args.file)})"
+
     try:
         while connection_alive:
             # A. Get Next Packet
             if sim.is_finished():
-                print("\n[Sim] CSV Finished. Exiting Loop.")
+                print(f"\n{Colors.OKGREEN}[Sim]{Colors.ENDC} CSV Finished. Exiting Loop.")
                 break
 
             packet = sim.get_next_packet()
@@ -108,7 +277,7 @@ def main():
                 try:
                     link.send(msg)
                 except ConnectionError as e:
-                    print(f"\n[Link] Connection Died during send: {e}")
+                    print(f"\n{Colors.FAIL}[Link] Connection Died during send: {e}{Colors.ENDC}")
                     connection_alive = False
                     break
 
@@ -124,7 +293,7 @@ def main():
                             got_response = True
                             break
                     except ConnectionError as e:
-                        print(f"\n[Link] Connection Died during read: {e}")
+                        print(f"\n{Colors.FAIL}[Link] Connection Died during read: {e}{Colors.ENDC}")
                         connection_alive = False
                         break
 
@@ -141,18 +310,19 @@ def main():
 
             if attempts >= max_retries:
                 if pkt_count % 50 == 0:
-                     print(f"\r[FC] Timeout - Packet {pkt_count} skipped.\033[K", end='')
+                     print(f"\r{Colors.WARNING}[FC] Timeout - Packet {pkt_count} skipped.{Colors.ENDC}\033[K", end='')
                 continue # Skip this step
 
             # C. Parse Response
             fc_alt_val = 0.0
-            fc_stage_val = last_stage 
+            fc_accel_val = 0.0
+            fc_stage_val = last_stage
             current_values = []
-            
+
             if fc_response_line:
                 raw_content = fc_response_line[6:].strip()
                 current_values = [x.strip() for x in raw_content.split(',')]
-                
+
                 if fc_col_map:
                     def get_fc(keys_list, default):
                         for k in keys_list:
@@ -161,40 +331,78 @@ def main():
                         return default
 
                     fc_alt_str = get_fc(["State - PZ (m)", "Alt", "State - Alt (m)"], "0")
+                    fc_accel_str = get_fc(["State - AZ (m/s/s)", "State - AZ (m/s^2)", "State - AZ (m/s²)", "Accel Z", "AZ", "State - AZ"], "0")
                     temp_stage = get_fc(["State - Flight Stage", "Stage"], last_stage)
                     if "-" in temp_stage: temp_stage = temp_stage.split('-')[-1].strip()
                     fc_stage_val = temp_stage
                     try: fc_alt_val = float(fc_alt_str)
                     except: pass
+                    try: fc_accel_val = float(fc_accel_str)
+                    except: pass
 
             # D. Store & Display
             history['time'].append(packet.timestamp)
-            history['sim_alt'].append(packet.alt)
+            history['sim_alt'].append(packet.truth_alt if packet.truth_alt is not None else packet.alt)  # Ground truth
+            history['sensor_alt'].append(packet.alt)     # Altitude from sensors (with noise if enabled)
             history['fc_alt'].append(fc_alt_val)
             history['fc_stage'].append(fc_stage_val)
             history['fc_values'].append(current_values)
+            history['truth_accel'].append(packet.truth_accel if packet.truth_accel is not None else 0.0)  # Ground truth inertial accel
+            history['sensor_accel'].append(packet.accel[2])  # Sensor measured specific force (z-axis)
+            history['fc_accel'].append(fc_accel_val)  # KF estimated acceleration
 
             is_event = (fc_stage_val != last_stage)
-            status_str = f"{packet.timestamp:6.2f} | {packet.alt:8.1f} | {fc_stage_val:12} | {fc_alt_val:8.1f}"
-            
+
+            # Get stage info for display
+            stage_display = ""
+            stage_color = Colors.ENDC
+            try:
+                stage_num = int(fc_stage_val)
+                if stage_num in STAGE_NAMES:
+                    stage_name, _, stage_color = STAGE_NAMES[stage_num]
+                    stage_display = stage_name
+                else:
+                    stage_display = str(stage_num)
+            except:
+                stage_display = str(fc_stage_val)
+
+            # Format the row with better spacing
+            time_str = f"{packet.timestamp:>8.2f}"
+            sim_alt_str = f"{packet.alt:>8.1f}"
+            fc_alt_str = f"{fc_alt_val:>8.1f}"
+
             if is_event:
-                print(f"\r{status_str} | STAGE: {fc_stage_val}\033[K")
-            elif pkt_count % 50 == 0: 
-                sys.stdout.write(f"\r{status_str} | \033[K")
+                event_str = f"{stage_color}STAGE: {stage_display}{Colors.ENDC}"
+                print(f"\r{Colors.BRIGHT_YELLOW}{time_str}{Colors.ENDC} | {Colors.OKCYAN}{sim_alt_str}{Colors.ENDC} | {Colors.WARNING}{fc_alt_str}{Colors.ENDC} | {event_str}\033[K")
+            elif pkt_count % 50 == 0:
+                sys.stdout.write(f"\r{Colors.GRAY}{time_str} | {sim_alt_str} | {fc_alt_str} | {stage_color}{stage_display}{Colors.ENDC}\033[K")
                 sys.stdout.flush()
 
             last_stage = fc_stage_val
 
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print(f"\n{Colors.WARNING}Stopping...{Colors.ENDC}")
     finally:
         link.close()
-        print("\nSimulation Closed.")
+
+        # Terminate SITL process if we started it
+        if sitl_process:
+            print(f"{Colors.OKCYAN}[SITL]{Colors.ENDC} Terminating SITL process...")
+            sitl_process.terminate()
+            try:
+                sitl_process.wait(timeout=5.0)
+                print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process terminated gracefully")
+            except subprocess.TimeoutExpired:
+                print(f"{Colors.WARNING}[SITL]{Colors.ENDC} Process did not terminate, killing...")
+                sitl_process.kill()
+                sitl_process.wait()
+
+        print(f"\n{Colors.BOLD}{Colors.OKGREEN}Simulation Closed.{Colors.ENDC}")
         
-        # --- Save CSV Log ---
+       # --- Save CSV Log ---
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_name = f"sim_log_{timestamp_str}.csv"
-        print(f"Saving log to {log_name}...")
+        print(f"{Colors.OKCYAN}Saving log to {Colors.BOLD}{log_name}{Colors.ENDC}{Colors.OKCYAN}...{Colors.ENDC}")
         
         try:
             with open(log_name, 'w', newline='') as f:
@@ -220,27 +428,85 @@ def main():
                         row.extend(fc_row_data)
                     writer.writerow(row)
         except Exception as e:
-            print(f"Error saving log: {e}")
+            print(f"{Colors.FAIL}Error saving log: {e}{Colors.ENDC}")
 
         # --- Plot ---
-        print("Plotting results...")
+        print(f"{Colors.OKCYAN}Plotting results...{Colors.ENDC}")
         try:
-            plt.figure(figsize=(10, 6))
-            plt.plot(history['time'], history['sim_alt'], label='Sim Truth (m)', color='blue', alpha=0.6)
+            # Create figure with single altitude plot
+            fig, ax = plt.subplots(figsize=(14, 8))
+
+            # ===== ALTITUDE PLOT =====
+            # 1. Ground Truth
+            ax.plot(history['time'], history['sim_alt'],
+                    label='Ground Truth', color='black', linewidth=2.5, alpha=0.6)
+
+            # 2. Noisy Sensors (Faint background)
+            ax.plot(history['time'], history['sensor_alt'],
+                    label='Raw Sensor Data', color='gray', linewidth=1, alpha=0.4)
+
+            # 3. KF Estimate (Flight Computer)
+            # Filter out initial 0s for cleaner graph if FC reset late
             clean_fc = [x if x != 0 else None for x in history['fc_alt']]
-            plt.plot(history['time'], clean_fc, label='FC KF Estimate (m)', color='orange', linestyle='--')
+            ax.plot(history['time'], clean_fc,
+                    label='FC Estimate (KF)', color='orange', linewidth=2, linestyle='--')
+
+            # ===== STAGE TRANSITIONS =====
+            # Detect changes in stage and plot vertical lines
+            labeled_stages = set()
             
+            # Get Y-limits for text placement
+            y_min, y_max = ax.get_ylim()
+            if y_max < max(history['sim_alt']): y_max = max(history['sim_alt']) * 1.1
+
             for i in range(1, len(history['fc_stage'])):
                 if history['fc_stage'][i] != history['fc_stage'][i-1]:
-                    plt.axvline(x=history['time'][i], color='gray', linestyle=':', alpha=0.5)
+                    # Event Detected
+                    event_time = history['time'][i]
+                    stage_val = history['fc_stage'][i]
+                    
+                    # Determine Name and Color
+                    try:
+                        stage_num = int(stage_val)
+                        stage_name, stage_color, _ = STAGE_NAMES.get(stage_num, (str(stage_num), 'blue', Colors.OKBLUE))
+                    except:
+                        stage_name = str(stage_val)
+                        stage_color = 'blue'
+
+                    # Draw Vertical Line
+                    # We only add the label to the legend once per stage type
+                    label = f"Stage: {stage_name}"
+                    if label in labeled_stages:
+                        label = None
+                    else:
+                        labeled_stages.add(label)
+
+                    ax.axvline(x=event_time, color=stage_color, linestyle='-',
+                               linewidth=1.5, alpha=0.8, label=label)
+
+                    # Add Text Annotation directly on graph (Rotated)
+                    # Placed at 95% height of the graph
+                    ax.text(event_time, y_max * 0.95, f" {stage_name}", 
+                            color=stage_color, rotation=90, 
+                            verticalalignment='top', fontweight='bold', fontsize=9)
+
+            # Styling
+            ax.set_title(f"Flight Data: Altitude & State Estimation\nSource: {sim_source_name}", fontsize=16, fontweight='bold')
+            ax.set_xlabel("Time (seconds)", fontsize=12)
+            ax.set_ylabel("Altitude (meters)", fontsize=12)
+            ax.grid(True, which='both', linestyle='--', alpha=0.4)
+            ax.legend(loc='best', fontsize=10, framealpha=0.9)
             
-            plt.title("Simulation vs Flight Computer Estimate")
-            plt.xlabel("Time (s)")
-            plt.ylabel("Altitude (m)")
-            plt.grid(True)
-            plt.legend()
+            # Set limits ensuring we see the text at the top
+            ax.set_ylim(top=y_max)
+
+            plt.tight_layout()
             plt.show()
-        except: pass
+
+        except Exception as e:
+            print(f"{Colors.FAIL}Plotting error: {e}{Colors.ENDC}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     main()
