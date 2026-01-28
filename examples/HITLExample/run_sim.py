@@ -84,6 +84,7 @@ Examples:
     # SITL executable options
     parser.add_argument('--sitl-exe', help="Path to SITL executable (default: .pio/build/native/program.exe)")
     parser.add_argument('--no-auto-start', action='store_true', help="Don't auto-start SITL executable (manual start required)")
+    parser.add_argument('--build', action='store_true', help="Build native environment with 'pio run -e native' before running")
 
     # Sensor simulation options
     parser.add_argument('--rotate', action='store_true', help="Apply random rotation to sensor data (simulates tilted rail)")
@@ -96,6 +97,36 @@ Examples:
     parser.add_argument('--baro-noise', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
 
     args = parser.parse_args()
+
+    # --- 0. Build Native Environment (if requested) ---
+    if args.build:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+        print(f"{Colors.OKCYAN}[Build]{Colors.ENDC} Building native environment...")
+        print(f"{Colors.GRAY}[Build]{Colors.ENDC} Running: {Colors.BOLD}pio run -e native{Colors.ENDC}")
+
+        try:
+            result = subprocess.run(
+                ['pio', 'run', '-e', 'native'],
+                cwd=project_root,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                print(f"{Colors.OKGREEN}[Build]{Colors.ENDC} Build successful!")
+            else:
+                print(f"{Colors.FAIL}[Build]{Colors.ENDC} Build failed with return code {result.returncode}")
+                print(f"{Colors.FAIL}[Build]{Colors.ENDC} stderr: {result.stderr}")
+                sys.exit(1)
+
+        except FileNotFoundError:
+            print(f"{Colors.FAIL}[Build]{Colors.ENDC} 'pio' command not found. Make sure PlatformIO is installed.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"{Colors.FAIL}[Build]{Colors.ENDC} Build error: {e}")
+            sys.exit(1)
 
     # --- 1. Start SITL Executable (if needed) ---
     sitl_process = None
@@ -489,39 +520,8 @@ Examples:
         # --- Plot ---
         print(f"{Colors.OKCYAN}Plotting results...{Colors.ENDC}")
         try:
-            import numpy as np
-
-            # Calculate magnitudes and derived values
-            csv_accel_mag = [np.linalg.norm(v) for v in history['csv_accel_vec']]
-            hitl_accel_mag = [np.linalg.norm(v) for v in history['hitl_accel_vec']]
-            fc_hitl_accel_mag = [np.linalg.norm(v) for v in history['fc_hitl_accel_vec']]
-            fc_accel_mag = [np.linalg.norm(v) for v in history['fc_accel_vec']]
-            fc_vel_mag = [np.linalg.norm(v) for v in history['fc_vel_vec']]
-
-            # Integrate HITL acceleration to get velocity
-            integrated_vel = [0.0]
-            for i in range(1, len(history['time'])):
-                dt = history['time'][i] - history['time'][i-1]
-                # Simple integration: v[i] = v[i-1] + a[i] * dt
-                # Using HITL acceleration magnitude
-                integrated_vel.append(integrated_vel[-1] + hitl_accel_mag[i] * dt)
-
-            # Derive velocity from barometric altitude
-            baro_vel = [0.0]
-            for i in range(1, len(history['time'])):
-                dt = history['time'][i] - history['time'][i-1]
-                if dt > 0:
-                    dh = history['sensor_alt'][i] - history['sensor_alt'][i-1]
-                    baro_vel.append(dh / dt)
-                else:
-                    baro_vel.append(baro_vel[-1])
-
-            # Create figure with multiple subplots (2x2 layout)
-            fig, axes = plt.subplots(2, 2, figsize=(18, 12))
-            ax_alt = axes[0, 0]
-            ax_acc = axes[0, 1]
-            ax_vel_int = axes[1, 0]
-            ax_vel = axes[1, 1]
+            # Create single altitude plot
+            fig, ax_alt = plt.subplots(1, 1, figsize=(12, 8))
 
             # ===== ALTITUDE PLOT =====
             ax_alt.plot(history['time'], history['sim_alt'],
@@ -531,39 +531,6 @@ Examples:
             clean_fc = [x if x != 0 else None for x in history['fc_alt']]
             ax_alt.plot(history['time'], clean_fc,
                         label='FC Estimate (KF)', color='orange', linewidth=2, linestyle='--')
-
-            # ===== ACCELERATION MAGNITUDE: ALL THREE SOURCES =====
-            ax_acc.plot(history['time'], csv_accel_mag,
-                       label='CSV Raw Data', color='blue', linewidth=2, alpha=0.7)
-            ax_acc.plot(history['time'], fc_hitl_accel_mag,
-                       label='FC HITL Accel (Received)', color='green', linewidth=2, alpha=0.7)
-            ax_acc.plot(history['time'], fc_accel_mag,
-                       label='FC State (AX/AY/AZ)', color='red', linewidth=2, alpha=0.7)
-            ax_acc.set_ylabel('Acceleration (m/s²)', fontsize=10)
-            ax_acc.set_xlabel('Time (s)', fontsize=10)
-            ax_acc.set_title('Acceleration Magnitude Comparison', fontsize=12, fontweight='bold')
-            ax_acc.grid(True, alpha=0.4)
-            ax_acc.legend(loc='best', fontsize=9)
-
-            # ===== VELOCITY: INTEGRATED FROM ACCELERATION =====
-            ax_vel_int.plot(history['time'], integrated_vel,
-                           label='Integrated from HITL Accel', color='purple', linewidth=2)
-            ax_vel_int.set_ylabel('Velocity (m/s)', fontsize=10)
-            ax_vel_int.set_xlabel('Time (s)', fontsize=10)
-            ax_vel_int.set_title('Velocity: Integrated from Accel', fontsize=12, fontweight='bold')
-            ax_vel_int.grid(True, alpha=0.4)
-            ax_vel_int.legend(loc='best', fontsize=9)
-
-            # ===== VELOCITY: COMPARISON =====
-            ax_vel.plot(history['time'], fc_vel_mag,
-                       label='FC State Velocity Mag', color='orange', linewidth=2)
-            ax_vel.plot(history['time'], baro_vel,
-                       label='Derived from Baro Alt', color='cyan', linewidth=2, alpha=0.7)
-            ax_vel.set_ylabel('Velocity (m/s)', fontsize=10)
-            ax_vel.set_xlabel('Time (s)', fontsize=10)
-            ax_vel.set_title('Velocity: FC State vs Baro Derivative', fontsize=12, fontweight='bold')
-            ax_vel.grid(True, alpha=0.4)
-            ax_vel.legend(loc='best', fontsize=9)
 
             # ===== STAGE TRANSITIONS (on altitude plot) =====
             labeled_stages = set()
@@ -593,6 +560,10 @@ Examples:
                     ax_alt.text(event_time, y_max * 0.95, f" {stage_name}",
                                color=stage_color, rotation=90,
                                verticalalignment='top', fontweight='bold', fontsize=9)
+
+            # Add unlabeled vertical lines at specific times
+            ax_alt.axvline(x=7.056, color='black', linestyle='--', linewidth=1, alpha=0.5)
+            ax_alt.axvline(x=9.238, color='black', linestyle='--', linewidth=1, alpha=0.5)
 
             # Styling for altitude plot
             ax_alt.set_title(f"Altitude & State Estimation", fontsize=12, fontweight='bold')

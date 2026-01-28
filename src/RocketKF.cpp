@@ -78,9 +78,9 @@ Matrix RocketKF::getR() {
     double *data = new double[9]{0};
 
     // Position noise (e.g., GPS accuracy ~2.0m)
-    data[0] = data[4] = 2.0;
+    data[0] = data[4] = 5.0;
     //baro
-    data[8] = 2;
+    data[8] = 0.5;
 
     return Matrix(3, 3, data);
 }
@@ -92,10 +92,15 @@ Matrix RocketKF::getQ(double dt) {
 
     // Position uncertainty (from unmodeled dynamics)
     data[0] = data[7] = data[14] = (dt * dt * dt * dt) / 4.0;
+
+    data[3] = data[10] = data[17] = (dt * dt * dt) / 2.0;
+
+    data[18] = data[25] = data[32] = (dt * dt * dt) / 2.0;
+
     // Velocity uncertainty (from unmodeled accelerations)
     data[21] = data[28] = data[35] = (dt * dt);
 
-    return Matrix(6, 6, data) * 10000; // Scale overall process noise
+    return Matrix(6, 6, data) * (.2 * .2); // Scale overall process noise
 }
 
 } // namespace astra
