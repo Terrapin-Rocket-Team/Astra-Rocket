@@ -80,7 +80,7 @@ Matrix RocketKF::getR() {
     // Position noise (e.g., GPS accuracy ~2.0m)
     data[0] = data[7] = 2.0; 
     //baro
-    data[14] = 2;
+    data[14] = 2.0;
     
     // Acceleration noise (e.g., Accelerometer noise ~3 m/s^2)
     data[21] = data[28] = data[35] = 1.0;
