@@ -78,10 +78,12 @@ Matrix RocketKF::getR() {
     double *data = new double[36]{0};
     
     // Position noise (e.g., GPS accuracy ~2.0m)
-    data[0] = 2.0; data[7] = 2.0; data[14] = 2.0;
+    data[0] = data[7] = 2.0; 
+    //baro
+    data[14] = 2;
     
-    // Acceleration noise (e.g., Accelerometer noise ~0.5 m/s^2)
-    data[21] = 3; data[28] = 3; data[35] = 3;
+    // Acceleration noise (e.g., Accelerometer noise ~3 m/s^2)
+    data[21] = data[28] = data[35] = 1.0;
     
     return Matrix(6, 6, data);
 }
@@ -91,14 +93,14 @@ Matrix RocketKF::getR() {
 // So we inject noise primarily into the Acceleration states.
 Matrix RocketKF::getQ(double dt) {
     double *data = new double[81]{0};
-    double jerk_uncertainty = 1.0; // Allow accel to vary by ~1 m/s^2 per step
-
+    
+    // Rows 0,1,2 (Position Indices)
+    data[0] = data[10] = data[20] = (dt * dt * dt *dt) / 4.0;
+    data[30] = data[40] = data[50] = (dt * dt * dt) / 2.0;
     // Rows 6,7,8 (Acceleration Indices)
-    data[60] = jerk_uncertainty; 
-    data[70] = jerk_uncertainty; 
-    data[80] = jerk_uncertainty;
+    data[60] = data[70] = data[80] = dt;
 
-    return Matrix(9, 9, data);
+    return Matrix(9, 9, data) * 10000; // Scale overall process noise
 }
 
 } // namespace astra

@@ -161,8 +161,14 @@ Examples:
             print(f"{Colors.OKCYAN}[Sim]{Colors.ENDC} Starting Physics Simulation")
             base_sim = astra_sim.PhysicsSim()
 
-        # Always apply pad delay (allows FC to settle before flight)
-        sim = astra_sim.PadDelaySim(base_sim)
+        # Apply pad delay only for OpenRocket or PhysicsSim (not for real flight data)
+        # Real flight data already starts at the right time
+        if isinstance(base_sim, astra_sim.CSVSim) and base_sim.is_openrocket:
+            sim = astra_sim.PadDelaySim(base_sim)
+        elif isinstance(base_sim, astra_sim.PhysicsSim):
+            sim = astra_sim.PadDelaySim(base_sim)
+        else:
+            sim = base_sim
 
         # Apply rotation wrapper if requested
         if args.rotate:
@@ -247,7 +253,12 @@ Examples:
         'fc_values': [],
         'truth_accel': [],       # Ground truth acceleration (from sim)
         'sensor_accel': [],      # Measured acceleration (from accel sensor)
-        'fc_accel': []           # KF estimated acceleration
+        'fc_accel': [],          # KF estimated acceleration
+        'csv_accel_vec': [],     # Raw accelerometer from CSV (before any transforms)
+        'hitl_accel_vec': [],    # HITL accelerometer 3-axis vector sent to FC
+        'fc_hitl_accel_vec': [], # FC's echo of HITL accelerometer (from FC response)
+        'fc_accel_vec': [],      # FC state 3-axis acceleration vector
+        'fc_vel_vec': []         # FC state 3-axis velocity vector
     }
     last_stage = "BOOT"
     pkt_count = 0
@@ -318,6 +329,9 @@ Examples:
             fc_accel_val = 0.0
             fc_stage_val = last_stage
             current_values = []
+            fc_accel_x, fc_accel_y, fc_accel_z = 0.0, 0.0, 0.0
+            fc_vel_x, fc_vel_y, fc_vel_z = 0.0, 0.0, 0.0
+            fc_hitl_acc_x, fc_hitl_acc_y, fc_hitl_acc_z = 0.0, 0.0, 0.0
 
             if fc_response_line:
                 raw_content = fc_response_line[6:].strip()
@@ -332,12 +346,41 @@ Examples:
 
                     fc_alt_str = get_fc(["State - PZ (m)", "Alt", "State - Alt (m)"], "0")
                     fc_accel_str = get_fc(["State - AZ (m/s/s)", "State - AZ (m/s^2)", "State - AZ (m/s²)", "Accel Z", "AZ", "State - AZ"], "0")
+                    fc_accel_x_str = get_fc(["State - AX (m/s/s)", "State - AX (m/s^2)", "State - AX"], "0")
+                    fc_accel_y_str = get_fc(["State - AY (m/s/s)", "State - AY (m/s^2)", "State - AY"], "0")
+                    fc_vel_x_str = get_fc(["State - VX (m/s)", "State - VX"], "0")
+                    fc_vel_y_str = get_fc(["State - VY (m/s)", "State - VY"], "0")
+                    fc_vel_z_str = get_fc(["State - VZ (m/s)", "State - VZ"], "0")
+                    # Get HITL accelerometer values from FC response
+                    fc_hitl_acc_x_str = get_fc(["HITL_Accelerometer - Acc X (m/s^2)", "HITL Acc X"], "0")
+                    fc_hitl_acc_y_str = get_fc(["HITL_Accelerometer - Acc Y (m/s^2)", "HITL Acc Y"], "0")
+                    fc_hitl_acc_z_str = get_fc(["HITL_Accelerometer - Acc Z (m/s^2)", "HITL Acc Z"], "0")
                     temp_stage = get_fc(["State - Flight Stage", "Stage"], last_stage)
                     if "-" in temp_stage: temp_stage = temp_stage.split('-')[-1].strip()
                     fc_stage_val = temp_stage
                     try: fc_alt_val = float(fc_alt_str)
                     except: pass
                     try: fc_accel_val = float(fc_accel_str)
+                    except: pass
+
+                    # Parse acceleration and velocity vectors
+                    fc_accel_z = fc_accel_val
+                    try: fc_accel_x = float(fc_accel_x_str)
+                    except: pass
+                    try: fc_accel_y = float(fc_accel_y_str)
+                    except: pass
+                    try: fc_vel_x = float(fc_vel_x_str)
+                    except: pass
+                    try: fc_vel_y = float(fc_vel_y_str)
+                    except: pass
+                    try: fc_vel_z = float(fc_vel_z_str)
+                    except: pass
+                    # Parse HITL accelerometer echo from FC
+                    try: fc_hitl_acc_x = float(fc_hitl_acc_x_str)
+                    except: pass
+                    try: fc_hitl_acc_y = float(fc_hitl_acc_y_str)
+                    except: pass
+                    try: fc_hitl_acc_z = float(fc_hitl_acc_z_str)
                     except: pass
 
             # D. Store & Display
@@ -350,6 +393,11 @@ Examples:
             history['truth_accel'].append(packet.truth_accel if packet.truth_accel is not None else 0.0)  # Ground truth inertial accel
             history['sensor_accel'].append(packet.accel[2])  # Sensor measured specific force (z-axis)
             history['fc_accel'].append(fc_accel_val)  # KF estimated acceleration
+            history['csv_accel_vec'].append([packet.accel[0], packet.accel[1], packet.accel[2]])  # Raw CSV accel (same as HITL)
+            history['hitl_accel_vec'].append([packet.accel[0], packet.accel[1], packet.accel[2]])  # HITL 3-axis accel sent to FC
+            history['fc_hitl_accel_vec'].append([fc_hitl_acc_x, fc_hitl_acc_y, fc_hitl_acc_z])  # FC's echo of HITL accel
+            history['fc_accel_vec'].append([fc_accel_x, fc_accel_y, fc_accel_z])  # FC state 3-axis accel
+            history['fc_vel_vec'].append([fc_vel_x, fc_vel_y, fc_vel_z])  # FC state 3-axis velocity
 
             is_event = (fc_stage_val != last_stage)
 
@@ -433,39 +481,92 @@ Examples:
         # --- Plot ---
         print(f"{Colors.OKCYAN}Plotting results...{Colors.ENDC}")
         try:
-            # Create figure with single altitude plot
-            fig, ax = plt.subplots(figsize=(14, 8))
+            import numpy as np
+
+            # Calculate magnitudes and derived values
+            csv_accel_mag = [np.linalg.norm(v) for v in history['csv_accel_vec']]
+            hitl_accel_mag = [np.linalg.norm(v) for v in history['hitl_accel_vec']]
+            fc_hitl_accel_mag = [np.linalg.norm(v) for v in history['fc_hitl_accel_vec']]
+            fc_accel_mag = [np.linalg.norm(v) for v in history['fc_accel_vec']]
+            fc_vel_mag = [np.linalg.norm(v) for v in history['fc_vel_vec']]
+
+            # Integrate HITL acceleration to get velocity
+            integrated_vel = [0.0]
+            for i in range(1, len(history['time'])):
+                dt = history['time'][i] - history['time'][i-1]
+                # Simple integration: v[i] = v[i-1] + a[i] * dt
+                # Using HITL acceleration magnitude
+                integrated_vel.append(integrated_vel[-1] + hitl_accel_mag[i] * dt)
+
+            # Derive velocity from barometric altitude
+            baro_vel = [0.0]
+            for i in range(1, len(history['time'])):
+                dt = history['time'][i] - history['time'][i-1]
+                if dt > 0:
+                    dh = history['sensor_alt'][i] - history['sensor_alt'][i-1]
+                    baro_vel.append(dh / dt)
+                else:
+                    baro_vel.append(baro_vel[-1])
+
+            # Create figure with multiple subplots (2x2 layout)
+            fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+            ax_alt = axes[0, 0]
+            ax_acc = axes[0, 1]
+            ax_vel_int = axes[1, 0]
+            ax_vel = axes[1, 1]
 
             # ===== ALTITUDE PLOT =====
-            # 1. Ground Truth
-            ax.plot(history['time'], history['sim_alt'],
-                    label='Ground Truth', color='black', linewidth=2.5, alpha=0.6)
-
-            # 2. Noisy Sensors (Faint background)
-            ax.plot(history['time'], history['sensor_alt'],
-                    label='Raw Sensor Data', color='gray', linewidth=1, alpha=0.4)
-
-            # 3. KF Estimate (Flight Computer)
-            # Filter out initial 0s for cleaner graph if FC reset late
+            ax_alt.plot(history['time'], history['sim_alt'],
+                        label='Ground Truth', color='black', linewidth=2.5, alpha=0.6)
+            ax_alt.plot(history['time'], history['sensor_alt'],
+                        label='Raw Sensor Data', color='gray', linewidth=1, alpha=0.4)
             clean_fc = [x if x != 0 else None for x in history['fc_alt']]
-            ax.plot(history['time'], clean_fc,
-                    label='FC Estimate (KF)', color='orange', linewidth=2, linestyle='--')
+            ax_alt.plot(history['time'], clean_fc,
+                        label='FC Estimate (KF)', color='orange', linewidth=2, linestyle='--')
 
-            # ===== STAGE TRANSITIONS =====
-            # Detect changes in stage and plot vertical lines
+            # ===== ACCELERATION MAGNITUDE: ALL THREE SOURCES =====
+            ax_acc.plot(history['time'], csv_accel_mag,
+                       label='CSV Raw Data', color='blue', linewidth=2, alpha=0.7)
+            ax_acc.plot(history['time'], fc_hitl_accel_mag,
+                       label='FC HITL Accel (Received)', color='green', linewidth=2, alpha=0.7)
+            ax_acc.plot(history['time'], fc_accel_mag,
+                       label='FC State (AX/AY/AZ)', color='red', linewidth=2, alpha=0.7)
+            ax_acc.set_ylabel('Acceleration (m/s²)', fontsize=10)
+            ax_acc.set_xlabel('Time (s)', fontsize=10)
+            ax_acc.set_title('Acceleration Magnitude Comparison', fontsize=12, fontweight='bold')
+            ax_acc.grid(True, alpha=0.4)
+            ax_acc.legend(loc='best', fontsize=9)
+
+            # ===== VELOCITY: INTEGRATED FROM ACCELERATION =====
+            ax_vel_int.plot(history['time'], integrated_vel,
+                           label='Integrated from HITL Accel', color='purple', linewidth=2)
+            ax_vel_int.set_ylabel('Velocity (m/s)', fontsize=10)
+            ax_vel_int.set_xlabel('Time (s)', fontsize=10)
+            ax_vel_int.set_title('Velocity: Integrated from Accel', fontsize=12, fontweight='bold')
+            ax_vel_int.grid(True, alpha=0.4)
+            ax_vel_int.legend(loc='best', fontsize=9)
+
+            # ===== VELOCITY: COMPARISON =====
+            ax_vel.plot(history['time'], fc_vel_mag,
+                       label='FC State Velocity Mag', color='orange', linewidth=2)
+            ax_vel.plot(history['time'], baro_vel,
+                       label='Derived from Baro Alt', color='cyan', linewidth=2, alpha=0.7)
+            ax_vel.set_ylabel('Velocity (m/s)', fontsize=10)
+            ax_vel.set_xlabel('Time (s)', fontsize=10)
+            ax_vel.set_title('Velocity: FC State vs Baro Derivative', fontsize=12, fontweight='bold')
+            ax_vel.grid(True, alpha=0.4)
+            ax_vel.legend(loc='best', fontsize=9)
+
+            # ===== STAGE TRANSITIONS (on altitude plot) =====
             labeled_stages = set()
-            
-            # Get Y-limits for text placement
-            y_min, y_max = ax.get_ylim()
+            y_min, y_max = ax_alt.get_ylim()
             if y_max < max(history['sim_alt']): y_max = max(history['sim_alt']) * 1.1
 
             for i in range(1, len(history['fc_stage'])):
                 if history['fc_stage'][i] != history['fc_stage'][i-1]:
-                    # Event Detected
                     event_time = history['time'][i]
                     stage_val = history['fc_stage'][i]
-                    
-                    # Determine Name and Color
+
                     try:
                         stage_num = int(stage_val)
                         stage_name, stage_color, _ = STAGE_NAMES.get(stage_num, (str(stage_num), 'blue', Colors.OKBLUE))
@@ -473,32 +574,29 @@ Examples:
                         stage_name = str(stage_val)
                         stage_color = 'blue'
 
-                    # Draw Vertical Line
-                    # We only add the label to the legend once per stage type
                     label = f"Stage: {stage_name}"
                     if label in labeled_stages:
                         label = None
                     else:
                         labeled_stages.add(label)
 
-                    ax.axvline(x=event_time, color=stage_color, linestyle='-',
-                               linewidth=1.5, alpha=0.8, label=label)
+                    ax_alt.axvline(x=event_time, color=stage_color, linestyle='-',
+                                  linewidth=1.5, alpha=0.8, label=label)
+                    ax_alt.text(event_time, y_max * 0.95, f" {stage_name}",
+                               color=stage_color, rotation=90,
+                               verticalalignment='top', fontweight='bold', fontsize=9)
 
-                    # Add Text Annotation directly on graph (Rotated)
-                    # Placed at 95% height of the graph
-                    ax.text(event_time, y_max * 0.95, f" {stage_name}", 
-                            color=stage_color, rotation=90, 
-                            verticalalignment='top', fontweight='bold', fontsize=9)
+            # Styling for altitude plot
+            ax_alt.set_title(f"Altitude & State Estimation", fontsize=12, fontweight='bold')
+            ax_alt.set_xlabel("Time (s)", fontsize=10)
+            ax_alt.set_ylabel("Altitude (m)", fontsize=10)
+            ax_alt.grid(True, which='both', linestyle='--', alpha=0.4)
+            ax_alt.legend(loc='best', fontsize=9, framealpha=0.9)
+            ax_alt.set_ylim(top=y_max)
 
-            # Styling
-            ax.set_title(f"Flight Data: Altitude & State Estimation\nSource: {sim_source_name}", fontsize=16, fontweight='bold')
-            ax.set_xlabel("Time (seconds)", fontsize=12)
-            ax.set_ylabel("Altitude (meters)", fontsize=12)
-            ax.grid(True, which='both', linestyle='--', alpha=0.4)
-            ax.legend(loc='best', fontsize=10, framealpha=0.9)
-            
-            # Set limits ensuring we see the text at the top
-            ax.set_ylim(top=y_max)
+            # Overall figure title
+            fig.suptitle(f"Flight Data Analysis - Source: {sim_source_name}",
+                        fontsize=16, fontweight='bold', y=0.995)
 
             plt.tight_layout()
             plt.show()

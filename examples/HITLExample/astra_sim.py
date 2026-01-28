@@ -100,6 +100,7 @@ class CSVSim(DataSource):
     def __init__(self, filename):
         self.data = []
         self.index = 0
+        self.is_openrocket = False
         self._load_csv(filename)
         print(f"[Sim] Ready. Duration: {self.data[-1].timestamp:.1f}s")
 
@@ -120,7 +121,9 @@ class CSVSim(DataSource):
         
         header_index = -1; header_map = {}; converters = {}
         keys = {'time': ['time', 'timestamp'], 'alt': ['altitude', 'pos_z', 'height', 'alt asl'],
-                'acc_z': ['acceleration z', 'accel z', 'az', 'vertical acc'],
+                'acc_x': ['bmi088 - acc x', 'acc x (m/s^2)', 'acceleration x', 'accel x'],
+                'acc_y': ['bmi088 - acc y', 'acc y (m/s^2)', 'acceleration y', 'accel y'],
+                'acc_z': ['bmi088 - acc z', 'acc z (m/s^2)', 'acceleration z', 'accel z', 'vertical acc'],
                 'truth_acc_z': ['truth accel', 'true accel', 'inertial accel'],
                 'pres': ['pressure', 'baro', 'pres'], 'temp': ['temperature', 'temp']}
 
@@ -137,7 +140,7 @@ class CSVSim(DataSource):
                             converters[key_type] = lambda x: (x - 32.0) * 5.0/9.0
                         elif key_type == 'alt' and ('ft' in col_name or 'feet' in col_name):
                             converters[key_type] = lambda x: x * 0.3048
-                        elif key_type == 'acc_z' and ('g' in col_name and 'mag' not in col_name):
+                        elif key_type in ['acc_x', 'acc_y', 'acc_z'] and ('g' in col_name and 'mag' not in col_name):
                             converters[key_type] = lambda x: x * 9.80665
 
             if 'time' in found_cols and 'alt' in found_cols:
@@ -149,18 +152,23 @@ class CSVSim(DataSource):
 
         # Detect OpenRocket format: check if first data row has near-zero acceleration
         # OpenRocket reports inertial acceleration (gravity removed), so we need to add it back
-        is_openrocket = False
+        # Real flight data already has specific force, so we don't add gravity
         for i in range(header_index + 1, len(lines)):
             line = lines[i].strip()
             if not line or line.startswith('#'): continue
             first_data_row = line.split(',')
             try:
-                if 'acc_z' in header_map and header_map['acc_z'] < len(first_data_row):
-                    first_acc = converters['acc_z'](float(first_data_row[header_map['acc_z']].strip()))
-                    # OpenRocket starts at 0 inertial accel (at rest), so abs value should be < 1
-                    if abs(first_acc) < 1.0:
-                        is_openrocket = True
-                        print("[Sim] Detected OpenRocket format (inertial accel). Adding gravity to convert to specific force.")
+                # Check any available acc axis for OpenRocket detection
+                for acc_key in ['acc_z', 'acc_x', 'acc_y']:
+                    if acc_key in header_map and header_map[acc_key] < len(first_data_row):
+                        first_acc = converters[acc_key](float(first_data_row[header_map[acc_key]].strip()))
+                        # OpenRocket starts at 0 inertial accel (at rest), so abs value should be < 1
+                        if abs(first_acc) < 0.005:
+                            self.is_openrocket = True
+                            print("[Sim] Detected OpenRocket format (inertial accel). Adding gravity to convert to specific force.")
+                        else:
+                            print("[Sim] Detected real flight data format (specific force). Using values as-is.")
+                        break
                 break
             except:
                 break
@@ -173,15 +181,20 @@ class CSVSim(DataSource):
             try:
                 def get_val(k, d=0.0):
                     return converters[k](float(row[header_map[k]].strip())) if k in header_map and header_map[k] < len(row) else d
+
+                # Load all three accelerometer axes
+                sensor_x = get_val('acc_x')
+                sensor_y = get_val('acc_y')
                 sensor_z = get_val('acc_z')
 
                 # If OpenRocket format, add gravity to convert inertial accel -> specific force
-                if is_openrocket:
+                # (typically gravity is on the Z axis)
+                if self.is_openrocket:
                     sensor_z += 9.81
 
                 alt_val = get_val('alt')
                 truth_acc = get_val('truth_acc_z', 0.0)
-                self.data.append(PacketData(get_val('time'), np.array([0., 0., sensor_z]), np.zeros(3), np.zeros(3),
+                self.data.append(PacketData(get_val('time'), np.array([sensor_x, sensor_y, sensor_z]), np.zeros(3), np.zeros(3),
                                           get_val('pres', 1013.25), get_val('temp', 25.0), 45.0, -122.0, alt_val, 1, 8, 0.0,
                                           truth_alt=alt_val, truth_accel=truth_acc))
                 count += 1
