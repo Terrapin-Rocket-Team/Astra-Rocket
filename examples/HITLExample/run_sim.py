@@ -6,6 +6,7 @@ import csv
 import matplotlib.pyplot as plt
 import subprocess
 import os
+import platform
 import astra_link
 import astra_sim
 
@@ -106,7 +107,14 @@ Examples:
             # Default path relative to script location
             script_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
-            sitl_exe_path = os.path.join(project_root, '.pio', 'build', 'native', 'program.exe')
+
+            # Determine executable name based on platform
+            if platform.system() == 'Windows':
+                exe_name = 'program.exe'
+            else:  # Linux, macOS, etc.
+                exe_name = 'program'
+
+            sitl_exe_path = os.path.join(project_root, '.pio', 'build', 'native', exe_name)
 
         # Check if executable exists
         if os.path.exists(sitl_exe_path):
