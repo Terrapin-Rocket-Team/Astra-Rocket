@@ -34,6 +34,11 @@ namespace astra_mocks
         }
 
         Vector<3> getEarthAcceleration(const Vector<3>& accel) const override {
+            // If mock acceleration is set, return it directly
+            if (mockAccelValid) {
+                return mockEarthAccel;
+            }
+
             // For mocking: convert body-frame accel to earth-frame and remove gravity
             // Body frame: Z down is negative (accel sensor reading)
             // Earth frame: Z up is positive, gravity removed
@@ -42,9 +47,17 @@ namespace astra_mocks
             return earthAccel;
         }
 
+        // Helper to directly set the earth-frame acceleration for testing
+        void setMockEarthAcceleration(const Vector<3>& accel) {
+            mockEarthAccel = accel;
+            mockAccelValid = true;
+        }
+
     private:
         Quaternion mockQ = Quaternion(1.0, 0.0, 0.0, 0.0);
         bool mockValid = false;
+        Vector<3> mockEarthAccel = Vector<3>(0, 0, 0);
+        bool mockAccelValid = false;
     };
 
 } // namespace astra_mocks

@@ -3,7 +3,7 @@
 #include <UnitTestSensors.h>
 #include <Sensors/SensorManager/SensorManager.h>
 #include "../../src/RocketState.h"
-#include "../../src/RocketKF.h"
+#include <Filters/DefaultKalmanFilter.h>
 #include <cmath>
 
 using namespace astra_rocket;
@@ -13,7 +13,7 @@ using namespace astra;
 FakeBarometer fakeBaro;
 FakeIMU fakeIMU;
 SensorManager* sensorManager;
-RocketKF* kalmanFilter;
+DefaultKalmanFilter* kalmanFilter;
 MahonyAHRS* orientationFilter;
 RocketState* state;
 
@@ -23,13 +23,13 @@ void setUp(void) {
 
     // Create sensor manager
     sensorManager = new SensorManager();
-    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
-    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
-    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->setAccelSource(fakeIMU.getAccelSensor());
+    sensorManager->setGyroSource(fakeIMU.getGyroSensor());
+    sensorManager->setBaroSource(&fakeBaro);
     sensorManager->begin();
 
     // Create filters
-    kalmanFilter = new RocketKF();
+    kalmanFilter = new DefaultKalmanFilter();
     orientationFilter = new MahonyAHRS();
 
     // Create state with filters
@@ -60,10 +60,10 @@ void simulateUpdate(double dt = 0.02) {
     setMillis(currentMillis + (unsigned long)(dt * 1000.0));
 
     // Update sensor manager
-    sensorManager->update();
+    double newTime = millis() / 1000.0;
+    sensorManager->update(newTime);
 
     // Update state (expects time in seconds, not milliseconds)
-    double newTime = millis() / 1000.0;
     state->predictState(newTime);  // Prediction step
 
     state->update(newTime);        // Measurement update

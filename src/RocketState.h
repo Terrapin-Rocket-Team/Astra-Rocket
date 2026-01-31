@@ -59,7 +59,7 @@ public:
      */
     double getTimeInStage() const { return timeInCurrentStage; }
 
-    void update(double currentTimeSec = -1) override;
+    bool update(double currentTimeSec = -1) override;
 
 private:
     // Flight stage tracking

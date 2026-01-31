@@ -6,9 +6,7 @@
  * for live visualization with the Python script.
  *
  * Compatible with:
- * - Teensy 4.1 with BMI088 + LIS3MDL (9-DoF)
- * - Teensy 4.1 with BNO055 (9-DoF)
- * - STM32 with any supported IMU
+ * - Teensy 4.1 with BMI088 + LIS3MDL (9-DoF) - MAGNETOMETER REQUIRED
  *
  * Output format (CSV):
  * time,ax,ay,az,gx,gy,gz,mx,my,mz,qw,qx,qy,qz,roll,pitch,yaw
@@ -25,7 +23,6 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Sensors/SensorManager/SensorManager.h>
-#include <Sensors/HW/IMU/BNO055.h>
 #include <Sensors/HW/IMU/BMI088.h>
 #include <Filters/Mahony.h>
 #include <Math/Vector.h>
@@ -34,14 +31,7 @@
 using namespace astra;
 
 // ============ HARDWARE CONFIGURATION ============
-// Choose your IMU by uncommenting ONE of the following:
-
-// Option 1: BNO055 9-DoF IMU (has built-in magnetometer)
-// #define USE_BNO055
-// #define BNO055_ADDRESS 0x28  // or 0x29
-
-// Option 2: BMI088 6-DoF IMU + LIS3MDL Magnetometer = 9-DoF
-#define USE_BMI088_LIS3MDL
+// BMI088 6-DoF IMU + LIS3MDL Magnetometer = 9-DoF (MAGNETOMETER REQUIRED)
 #define BMI088_ACCEL_ADDR 0x18
 #define BMI088_GYRO_ADDR 0x68
 #define LIS3MDL_SA1_STATE LIS3MDL::sa1_auto  // Auto-detect address (0x1C or 0x1E)
@@ -60,15 +50,8 @@ const unsigned long MAG_CALIBRATION_TIME = 10000;  // Magnetometer calibration t
 // ============ GLOBAL OBJECTS ============
 SensorManager sensorManager;
 MahonyAHRS mahony(MAHONY_KP, MAHONY_KI);
-
-#ifdef USE_BNO055
-BNO055 bno055("BNO055", BNO055_ADDRESS, &Wire);
-#endif
-
-#ifdef USE_BMI088_LIS3MDL
 BMI088 bmi088("BMI088", Wire, BMI088_ACCEL_ADDR, BMI088_GYRO_ADDR);
 LIS3MDL_Wrapper magnetometer("LIS3MDL", LIS3MDL_SA1_STATE);
-#endif
 
 // Timing
 unsigned long lastUpdate = 0;
@@ -84,9 +67,7 @@ void setup() {
         delay(10);
     }
 
-    Serial.println("# ========================================");
-    Serial.println("# Mahony Filter Hardware Test");
-    Serial.println("# ========================================");
+    Serial.println("# Mahony Filter Hardware Test - 9-DoF");
     Serial.println("#");
 
     // Initialize I2C
@@ -94,98 +75,75 @@ void setup() {
     Wire.setClock(400000);  // 400kHz I2C
     delay(100);
 
-    // Initialize IMU
-    #ifdef USE_BNO055
-    Serial.print("# Initializing BNO055... ");
-    if (!bno055.init()) {
-        Serial.println("FAILED!");
-        Serial.println("# ERROR: Could not initialize BNO055");
-        Serial.println("# Check I2C connections and addresses");
-        while (1) {
-            delay(1000);
-        }
-    }
-    Serial.println("OK");
-    sensorManager.setPrimaryAccel(bno055.getAccelSensor());
-    sensorManager.setPrimaryGyro(bno055.getGyroSensor());
-    sensorManager.setPrimaryMag(bno055.getMagSensor());
-    Serial.println("# IMU: BNO055 9-DoF (with built-in magnetometer)");
-    #endif
-
-    #ifdef USE_BMI088_LIS3MDL
+    // Initialize BMI088
     Serial.print("# Initializing BMI088... ");
     if (!bmi088.begin()) {
         Serial.println("FAILED!");
         Serial.println("# ERROR: Could not initialize BMI088");
-        Serial.println("# Check I2C connections and addresses");
         while (1) {
             delay(1000);
         }
     }
     Serial.println("OK");
-    sensorManager.setPrimaryAccel(bmi088.getAccelSensor());
-    sensorManager.setPrimaryGyro(bmi088.getGyroSensor());
-    sensorManager.addMiscSensor(&bmi088);  // Add BMI088 as misc sensor for regular updates
 
-    // Initialize magnetometer
-    Serial.print("# Initializing LIS3MDL magnetometer... ");
+    // Initialize magnetometer (REQUIRED)
+    Serial.print("# Initializing LIS3MDL... ");
     if (!magnetometer.begin()) {
         Serial.println("FAILED!");
-        Serial.println("# ERROR: Could not initialize LIS3MDL");
-        Serial.println("# Check I2C connections and address (should be 0x1C or 0x1E)");
-        Serial.println("# Continuing without magnetometer (6-DoF mode)");
-    } else {
-        Serial.println("OK");
-        sensorManager.setPrimaryMag(&magnetometer);
-        Serial.println("# IMU: BMI088 + LIS3MDL = 9-DoF");
+        Serial.println("# ERROR: Magnetometer is REQUIRED for this test");
+        while (1) {
+            delay(1000);
+        }
     }
-    #endif
+    Serial.println("OK");
 
+    sensorManager.setAccelSource(bmi088.getAccelSensor());
+    sensorManager.setGyroSource(bmi088.getGyroSensor());
+    sensorManager.setMagSource(&magnetometer);
+    sensorManager.addMiscSensor(&bmi088);
     sensorManager.begin();
 
-    Serial.println("#");
-    Serial.println("# Filter Configuration:");
-    Serial.print("# - Kp (Proportional): ");
-    Serial.println(MAHONY_KP, 4);
-    Serial.print("# - Ki (Integral): ");
-    Serial.println(MAHONY_KI, 6);
-    Serial.print("# - Update Rate: ");
-    Serial.print(UPDATE_RATE);
-    Serial.println(" Hz");
-    Serial.println("#");
-
     // Test sensor readings
-    Serial.println("# Testing sensor readings...");
-    sensorManager.update();
-    Vector<3> testAccel = sensorManager.getAccel();
-    Vector<3> testGyro = sensorManager.getGyro();
-    Vector<3> testMag = sensorManager.getMag();
+    Serial.println("# Testing sensors...");
+    sensorManager.update(0.0);
+    Vector<3> testAccel = sensorManager.getAccelSource()->getAccel();
+    Vector<3> testGyro = sensorManager.getGyroSource()->getAngVel();
+    Vector<3> testMag = sensorManager.getMagSource()->getMag();
 
-    Serial.print("# Test Accel: ");
-    Serial.print(testAccel.x(), 3);
+    Serial.print("# Accel: ");
+    Serial.print(testAccel.x(), 2);
     Serial.print(", ");
-    Serial.print(testAccel.y(), 3);
+    Serial.print(testAccel.y(), 2);
     Serial.print(", ");
-    Serial.println(testAccel.z(), 3);
+    Serial.println(testAccel.z(), 2);
 
-    Serial.print("# Test Gyro: ");
-    Serial.print(testGyro.x(), 3);
+    Serial.print("# Gyro: ");
+    Serial.print(testGyro.x(), 2);
     Serial.print(", ");
-    Serial.print(testGyro.y(), 3);
+    Serial.print(testGyro.y(), 2);
     Serial.print(", ");
-    Serial.println(testGyro.z(), 3);
+    Serial.println(testGyro.z(), 2);
 
-    Serial.print("# Test Mag: ");
-    Serial.print(testMag.x(), 3);
+    Serial.print("# Mag: ");
+    Serial.print(testMag.x(), 2);
     Serial.print(", ");
-    Serial.print(testMag.y(), 3);
+    Serial.print(testMag.y(), 2);
     Serial.print(", ");
-    Serial.println(testMag.z(), 3);
+    Serial.println(testMag.z(), 2);
+
+    // Check for NaN in initial readings
+    if (isnan(testAccel.x()) || isnan(testAccel.y()) || isnan(testAccel.z()) ||
+        isnan(testGyro.x()) || isnan(testGyro.y()) || isnan(testGyro.z()) ||
+        isnan(testMag.x()) || isnan(testMag.y()) || isnan(testMag.z())) {
+        Serial.println("# ERROR: NaN detected in sensor readings!");
+        while (1) {
+            delay(1000);
+        }
+    }
 
     Serial.println("#");
     Serial.println("# === CALIBRATION PHASE 1: STATIONARY ===");
-    Serial.println("# Keep the board STATIONARY for gyro bias calibration!");
-    Serial.println("#");
+    Serial.println("# Keep board STATIONARY for gyro bias calibration!");
 
     mahony.setMode(MahonyMode::CALIBRATING);
     startTime = millis();
@@ -202,18 +160,38 @@ void loop() {
     lastUpdate = currentTime;
 
     // Update sensors
-    sensorManager.update();
+    sensorManager.update(currentTime / 1000.0);
 
     // Get sensor data
-    Vector<3> accel = sensorManager.getAccel();
-    Vector<3> gyro = sensorManager.getGyro();
-    Vector<3> mag(0, 0, 0);
-    bool hasMag = false;
+    Vector<3> accel = sensorManager.getAccelSource()->getAccel();
+    Vector<3> gyro = sensorManager.getGyroSource()->getAngVel();
+    Vector<3> mag = sensorManager.getMagSource()->getMag();
 
-    #if defined(USE_BNO055) || defined(USE_BMI088_LIS3MDL)
-    mag = sensorManager.getMag();
-    hasMag = true;
-    #endif
+    // Check for NaN in sensor readings during operation
+    if (isnan(accel.x()) || isnan(accel.y()) || isnan(accel.z()) ||
+        isnan(gyro.x()) || isnan(gyro.y()) || isnan(gyro.z()) ||
+        isnan(mag.x()) || isnan(mag.y()) || isnan(mag.z())) {
+        Serial.println("# ERROR: NaN detected in sensor readings during operation!");
+        Serial.print("# Accel: ");
+        Serial.print(accel.x());
+        Serial.print(", ");
+        Serial.print(accel.y());
+        Serial.print(", ");
+        Serial.println(accel.z());
+        Serial.print("# Gyro: ");
+        Serial.print(gyro.x());
+        Serial.print(", ");
+        Serial.print(gyro.y());
+        Serial.print(", ");
+        Serial.println(gyro.z());
+        Serial.print("# Mag: ");
+        Serial.print(mag.x());
+        Serial.print(", ");
+        Serial.print(mag.y());
+        Serial.print(", ");
+        Serial.println(mag.z());
+        return;
+    }
 
     // Check if calibration is complete
     if (!calibrationComplete) {
@@ -222,32 +200,52 @@ void loop() {
         // Update filter in calibration mode (6-DoF for gyro bias)
         mahony.update(accel, gyro, DT);
 
+        // Debug: Check quaternion during calibration
+        if (calibrationCount % 50 == 0) {
+            Quaternion q = mahony.getQuaternion();
+            Serial.print("# Calib quat: ");
+            Serial.print(q.w(), 4);
+            Serial.print(", ");
+            Serial.print(q.x(), 4);
+            Serial.print(", ");
+            Serial.print(q.y(), 4);
+            Serial.print(", ");
+            Serial.println(q.z(), 4);
+        }
+
         // Check if stationary calibration time has elapsed
         if (currentTime - startTime >= CALIBRATION_TIME) {
             mahony.finalizeCalibration();
+
+            Quaternion q_before_lock = mahony.getQuaternion();
+            Serial.print("# Quat before lock: ");
+            Serial.print(q_before_lock.w(), 4);
+            Serial.print(", ");
+            Serial.print(q_before_lock.x(), 4);
+            Serial.print(", ");
+            Serial.print(q_before_lock.y(), 4);
+            Serial.print(", ");
+            Serial.println(q_before_lock.z(), 4);
+
             mahony.lockFrame();
+
+            Quaternion q_after_lock = mahony.getQuaternion();
+            Serial.print("# Quat after lock: ");
+            Serial.print(q_after_lock.w(), 4);
+            Serial.print(", ");
+            Serial.print(q_after_lock.x(), 4);
+            Serial.print(", ");
+            Serial.print(q_after_lock.y(), 4);
+            Serial.print(", ");
+            Serial.println(q_after_lock.z(), 4);
+
             calibrationComplete = true;
 
-            Serial.println("# Stationary calibration complete!");
+            Serial.println("# Phase 1 complete!");
             Serial.println("#");
-
-            #if defined(USE_BNO055) || defined(USE_BMI088_LIS3MDL)
-            if (hasMag) {
-                Serial.println("# === CALIBRATION PHASE 2: MAGNETOMETER ===");
-                Serial.println("# Rotate the board in ALL directions (the 'mag dance')!");
-                Serial.println("# Move through as many orientations as possible...");
-                Serial.println("#");
-                magCalibStartTime = currentTime;
-            } else {
-                Serial.println("# No magnetometer detected - using 6-DoF mode");
-                mahony.setMode(MahonyMode::CORRECTING);
-                magCalibrationComplete = true;
-            }
-            #else
-            Serial.println("# No magnetometer configured - using 6-DoF mode");
-            mahony.setMode(MahonyMode::CORRECTING);
-            magCalibrationComplete = true;
-            #endif
+            Serial.println("# === CALIBRATION PHASE 2: MAGNETOMETER ===");
+            Serial.println("# Rotate board in ALL directions!");
+            magCalibStartTime = currentTime;
         }
         return;
     }
@@ -255,50 +253,107 @@ void loop() {
     // Magnetometer calibration phase
     if (!magCalibrationComplete) {
         // Collect magnetometer samples while user rotates board
-        if (hasMag) {
-            mahony.collectMagCalibrationSample(mag);
-        }
+        mahony.collectMagCalibrationSample(mag);
 
         // Check if mag calibration time has elapsed
         if (currentTime - magCalibStartTime >= MAG_CALIBRATION_TIME) {
-            Serial.println("#");
-            Serial.println("# Magnetometer calibration complete!");
+            Quaternion q_before_finalize = mahony.getQuaternion();
+            Serial.print("# Quat before finalize: ");
+            Serial.print(q_before_finalize.w(), 4);
+            Serial.print(", ");
+            Serial.print(q_before_finalize.x(), 4);
+            Serial.print(", ");
+            Serial.print(q_before_finalize.y(), 4);
+            Serial.print(", ");
+            Serial.println(q_before_finalize.z(), 4);
 
-            if (hasMag) {
-                mahony.finalizeCalibration();  // This will compute mag calibration
-                if (mahony.isMagCalibrated()) {
-                    Serial.println("# Magnetometer successfully calibrated!");
-                    Serial.println("# Using 9-DoF mode (accel + gyro + mag)");
-                } else {
-                    Serial.println("# Warning: Magnetometer calibration failed (not enough samples)");
-                    Serial.println("# Falling back to 6-DoF mode");
-                }
+            mahony.finalizeCalibration();  // This will compute mag calibration
+
+            Quaternion q_after_finalize = mahony.getQuaternion();
+            Serial.print("# Quat after finalize: ");
+            Serial.print(q_after_finalize.w(), 4);
+            Serial.print(", ");
+            Serial.print(q_after_finalize.x(), 4);
+            Serial.print(", ");
+            Serial.print(q_after_finalize.y(), 4);
+            Serial.print(", ");
+            Serial.println(q_after_finalize.z(), 4);
+
+            if (mahony.isMagCalibrated()) {
+                Serial.println("# Phase 2 complete! Using 9-DoF mode");
+            } else {
+                Serial.println("# WARNING: Mag calibration failed!");
             }
 
             mahony.setMode(MahonyMode::CORRECTING);
+
+            Quaternion q_after_mode_change = mahony.getQuaternion();
+            Serial.print("# Quat after mode change: ");
+            Serial.print(q_after_mode_change.w(), 4);
+            Serial.print(", ");
+            Serial.print(q_after_mode_change.x(), 4);
+            Serial.print(", ");
+            Serial.print(q_after_mode_change.y(), 4);
+            Serial.print(", ");
+            Serial.println(q_after_mode_change.z(), 4);
+
             magCalibrationComplete = true;
 
-            Serial.println("#");
-            Serial.println("# CSV Data Format:");
-            Serial.println("# time,ax,ay,az,gx,gy,gz,mx,my,mz,qw,qx,qy,qz,roll,pitch,yaw");
-            Serial.println("#");
-            Serial.println("# You can now move/rotate the board");
-            Serial.println("# Pipe this output to visualize_live.py for live visualization");
             Serial.println("#");
             Serial.println("time,ax,ay,az,gx,gy,gz,mx,my,mz,qw,qx,qy,qz,roll,pitch,yaw");
         }
         return;
     }
 
-    // Update filter in flight mode with 9-DoF if magnetometer available
-    if (hasMag) {
-        mahony.update(accel, gyro, mag, DT);
-    } else {
-        mahony.update(accel, gyro, DT);
-    }
+    // Update filter in flight mode with 9-DoF
+    Quaternion q_before_update = mahony.getQuaternion();
+
+    mahony.update(accel, gyro, mag, DT);
 
     // Get orientation
     Quaternion q = mahony.getQuaternion();
+
+    // Check for NaN in quaternion
+    if (isnan(q.w()) || isnan(q.x()) || isnan(q.y()) || isnan(q.z())) {
+        Serial.println("# ERROR: NaN detected in quaternion!");
+        Serial.print("# Before update: ");
+        Serial.print(q_before_update.w(), 4);
+        Serial.print(", ");
+        Serial.print(q_before_update.x(), 4);
+        Serial.print(", ");
+        Serial.print(q_before_update.y(), 4);
+        Serial.print(", ");
+        Serial.println(q_before_update.z(), 4);
+        Serial.print("# After update: ");
+        Serial.print(q.w());
+        Serial.print(", ");
+        Serial.print(q.x());
+        Serial.print(", ");
+        Serial.print(q.y());
+        Serial.print(", ");
+        Serial.println(q.z());
+        Serial.print("# Inputs - Accel: ");
+        Serial.print(accel.x(), 4);
+        Serial.print(", ");
+        Serial.print(accel.y(), 4);
+        Serial.print(", ");
+        Serial.println(accel.z(), 4);
+        Serial.print("# Gyro: ");
+        Serial.print(gyro.x(), 4);
+        Serial.print(", ");
+        Serial.print(gyro.y(), 4);
+        Serial.print(", ");
+        Serial.println(gyro.z(), 4);
+        Serial.print("# Mag: ");
+        Serial.print(mag.x(), 4);
+        Serial.print(", ");
+        Serial.print(mag.y(), 4);
+        Serial.print(", ");
+        Serial.println(mag.z(), 4);
+        while (1) {
+            delay(1000);
+        }
+    }
 
     // Convert to Euler angles
     // Roll (X-axis rotation)

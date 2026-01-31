@@ -16,7 +16,7 @@
 
 #include "AstraRocketConfig.h"
 #include "RocketState.h"
-#include "RocketKF.h"
+#include <Filters/DefaultKalmanFilter.h>
 #include "FlightStage.h"
 
 using namespace astra;
@@ -98,7 +98,7 @@ namespace astra_rocket
         // Core Astra system
         Astra *astraSys;
         RocketState *rocketState;
-        RocketKF *kalmanFilter;
+        DefaultKalmanFilter *kalmanFilter;
         MahonyAHRS *orientationFilter;
 
         // Logging

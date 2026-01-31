@@ -54,8 +54,8 @@ namespace astra_rocket
         // No need to initialize them manually here
 
         // Create Kalman filter for state estimation
-        kalmanFilter = new RocketKF();
-        LOGI("RocketKF Kalman filter created");
+        kalmanFilter = new DefaultKalmanFilter();
+        LOGI("DefaultKalmanFilter created");
 
         // Create orientation filter for AHRS
         // Using default gains: Kp=0.1, Ki=0.0005
@@ -75,11 +75,11 @@ namespace astra_rocket
         auto sm = config.getSensorManager();
         if (sm)
         {
-            sm->setPrimaryAccel(new HITLAccel());
-            sm->setPrimaryGyro(new HITLGyro());
-            sm->setPrimaryBaro(new HITLBarometer());
-            sm->setPrimaryGPS(new HITLGPS());
-            sm->setPrimaryMag(new HITLMag());
+            sm->setAccelSource(new HITLAccel());
+            sm->setGyroSource(new HITLGyro());
+            sm->setBaroSource(new HITLBarometer());
+            sm->setGPSSource(new HITLGPS());
+            sm->setMagSource(new HITLMag());
         }
         else
         {
@@ -104,9 +104,9 @@ namespace astra_rocket
             // Hardware mode: Wait for barometer to stabilize
             delay(500);
             astraSys->update();
-            if (config.getSensorManager() && config.getSensorManager()->getPrimaryBaro()->isInitialized())
+            if (config.getSensorManager() && config.getSensorManager()->getBaroSource() && config.getSensorManager()->getBaroSource()->isInitialized())
             {
-                groundLevelAltitude = Barometer::calcAltitude(config.getSensorManager()->getPressure());
+                groundLevelAltitude = config.getSensorManager()->getBaroSource()->getASLAltM();
                 rocketState->setGroundLevel(groundLevelAltitude);
                 LOGI("Ground level established: %0.2f m MSL", groundLevelAltitude);
             }
@@ -156,7 +156,7 @@ namespace astra_rocket
                         // Set ground level from first valid packet (after update)
                         if (!hitlGroundLevelSet)
                         {
-                            auto barometer = config.getSensorManager()->getPrimaryBaro();
+                            auto barometer = config.getSensorManager()->getBaroSource();
 
                             // Debug: Check what pressure value we're reading
                             HITLSensorBuffer &buffer = HITLSensorBuffer::instance();

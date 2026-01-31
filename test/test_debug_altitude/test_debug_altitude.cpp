@@ -28,9 +28,9 @@ void setUp(void)
     fakeIMU.init();
 
     sensorManager = new SensorManager();
-    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
-    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
-    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->setAccelSource(fakeIMU.getAccelSensor());
+    sensorManager->setGyroSource(fakeIMU.getGyroSensor());
+    sensorManager->setBaroSource(&fakeBaro);
     sensorManager->begin();
 
     // Create mock filters

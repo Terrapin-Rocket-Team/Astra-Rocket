@@ -10,3 +10,6 @@
 # Auto-generated version tracking
 .version_build_track.json
 .claude/settings.local.json
+
+
+sim_log**

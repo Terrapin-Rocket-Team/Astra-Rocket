@@ -1,11 +1,10 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
-#include "../../src/RocketKF.h"
+#include <Filters/DefaultKalmanFilter.h>
 #include "../../.pio/libdeps/native/TRT-Astra/src/Filters/Mahony.h"
 #include "../../.pio/libdeps/native/TRT-Astra/src/Math/Vector.h"
 #include <cmath>
 
-using namespace astra_rocket;
 using namespace astra;
 
 /**
@@ -17,7 +16,7 @@ using namespace astra;
 
 // Test fixture
 MahonyAHRS* mahony;
-RocketKF* kf;
+DefaultKalmanFilter* kf;
 
 void setUp(void) {
     mahony = new MahonyAHRS();
@@ -33,7 +32,7 @@ void setUp(void) {
     }
     mahony->finalizeCalibration();
 
-    kf = new RocketKF();
+    kf = new DefaultKalmanFilter();
     kf->initialize();
 }
 
@@ -163,81 +162,109 @@ void test_mahony_conversion_boost() {
 
 void test_kf_measurement_at_rest() {
     // Simulate at rest on pad
-    // Measurement: [px, py, pz, ax, ay, az] where a is INERTIAL acceleration
+    // DefaultKalmanFilter uses 6-state model: [px, py, pz, vx, vy, vz]
+    // Acceleration is a CONTROL INPUT, not part of the state
+    // Measurement: [px, py, pz]
 
-    double measurement_data[6] = {
-        0, 0, 0,      // Position at origin
-        0, 0, 0       // Inertial accel = 0 (at rest)
+    double measurement_data[3] = {
+        0, 0, 0      // Position at origin
     };
-    Matrix measurement(6, 1, measurement_data);
+    Matrix measurement(3, 1, measurement_data);
+
+    // Control input is inertial acceleration
+    double control_data[3] = {
+        0, 0, 0      // Inertial accel = 0 (at rest)
+    };
+    Matrix control(3, 1, control_data);
 
     // Feed to KF
     for (int i = 0; i < 50; i++) {
-        Matrix control(0, 1);
         kf->predict(0.02, control);
         kf->update(measurement);
     }
 
     Matrix state = kf->getState();
-    double kf_accel_z = state(8, 0);
+    double kf_vel_z = state(5, 0);  // Velocity should be ~0
 
-    fprintf(stderr, "KF at rest: measurement_az=%.2f -> kf_state_az=%.2f (expected 0)\n",
-            measurement_data[5], kf_accel_z);
+    fprintf(stderr, "KF at rest: control_az=%.2f -> kf_state_vz=%.2f (expected 0)\n",
+            control_data[2], kf_vel_z);
 
-    // KF should estimate near-zero acceleration
-    TEST_ASSERT_DOUBLE_WITHIN(2.0, 0.0, kf_accel_z);
+    // KF should estimate near-zero velocity (which indicates zero acceleration)
+    TEST_ASSERT_DOUBLE_WITHIN(1.0, 0.0, kf_vel_z);
 }
 
 void test_kf_measurement_boost() {
     // Simulate boost phase with +30 m/s² inertial acceleration
+    // Acceleration is control input, not measurement
 
-    double measurement_data[6] = {
-        0, 0, 0,      // Position (simplification)
+    // Control input is inertial acceleration
+    double control_data[3] = {
         0, 0, 30.0    // Inertial accel = +30 m/s²
     };
-    Matrix measurement(6, 1, measurement_data);
+    Matrix control(3, 1, control_data);
 
-    // Feed to KF
+    // Start at origin
+    double measurement_data[3] = {0, 0, 0};
+    Matrix measurement(3, 1, measurement_data);
+
+    // Feed to KF - should integrate acceleration -> velocity -> position
     for (int i = 0; i < 50; i++) {
-        Matrix control(0, 1);
         kf->predict(0.02, control);
+
+        // Update position measurement to match predicted trajectory
+        Matrix state = kf->getState();
+        measurement_data[2] = state(2, 0);  // Use predicted position
+        measurement = Matrix(3, 1, measurement_data);
+
         kf->update(measurement);
     }
 
     Matrix state = kf->getState();
-    double kf_accel_z = state(8, 0);
+    double kf_vel_z = state(5, 0);  // Should be accelerating upward
 
-    fprintf(stderr, "KF boost: measurement_az=%.2f -> kf_state_az=%.2f (expected 30)\n",
-            measurement_data[5], kf_accel_z);
+    fprintf(stderr, "KF boost: control_az=%.2f -> kf_state_vz=%.2f (expected ~30 m/s after 1s)\n",
+            control_data[2], kf_vel_z);
 
-    // KF should estimate +30 m/s²
-    TEST_ASSERT_DOUBLE_WITHIN(5.0, 30.0, kf_accel_z);
+    // After 50 iterations * 0.02s = 1 second at 30 m/s² accel
+    // Velocity should be ~30 m/s
+    TEST_ASSERT_DOUBLE_WITHIN(10.0, 30.0, kf_vel_z);
 }
 
 void test_kf_measurement_freefall() {
     // Simulate freefall with -9.81 m/s² inertial acceleration
+    // Acceleration is control input
 
-    double measurement_data[6] = {
-        0, 0, 100,        // At altitude
+    // Control input is inertial acceleration
+    double control_data[3] = {
         0, 0, -9.81       // Inertial accel = -9.81 m/s² (falling)
     };
-    Matrix measurement(6, 1, measurement_data);
+    Matrix control(3, 1, control_data);
 
-    // Feed to KF
+    // Start at 100m altitude
+    double measurement_data[3] = {0, 0, 100};
+    Matrix measurement(3, 1, measurement_data);
+
+    // Feed to KF - should integrate acceleration -> velocity -> position
     for (int i = 0; i < 50; i++) {
-        Matrix control(0, 1);
         kf->predict(0.02, control);
+
+        // Update position measurement to match predicted trajectory
+        Matrix state = kf->getState();
+        measurement_data[2] = state(2, 0);  // Use predicted position
+        measurement = Matrix(3, 1, measurement_data);
+
         kf->update(measurement);
     }
 
     Matrix state = kf->getState();
-    double kf_accel_z = state(8, 0);
+    double kf_vel_z = state(5, 0);  // Should be falling
 
-    fprintf(stderr, "KF freefall: measurement_az=%.2f -> kf_state_az=%.2f (expected -9.81)\n",
-            measurement_data[5], kf_accel_z);
+    fprintf(stderr, "KF freefall: control_az=%.2f -> kf_state_vz=%.2f (expected ~-9.81 m/s after 1s)\n",
+            control_data[2], kf_vel_z);
 
-    // KF should estimate -9.81 m/s²
-    TEST_ASSERT_DOUBLE_WITHIN(2.0, -9.81, kf_accel_z);
+    // After 50 iterations * 0.02s = 1 second at -9.81 m/s² accel
+    // Velocity should be ~-9.81 m/s
+    TEST_ASSERT_DOUBLE_WITHIN(3.0, -9.81, kf_vel_z);
 }
 
 // ===== FULL CHAIN TEST =====
@@ -254,27 +281,29 @@ void test_full_chain_at_rest() {
     fprintf(stderr, "Full chain at rest: sensor=%.2f -> mahony=%.2f\n",
             specific_force.z(), inertial_accel.z());
 
-    // 3. Feed to KF as measurement
-    double measurement_data[6] = {
-        0, 0, 0,
+    // 3. Feed to KF as CONTROL INPUT (not measurement)
+    double control_data[3] = {
         inertial_accel.x(), inertial_accel.y(), inertial_accel.z()
     };
-    Matrix measurement(6, 1, measurement_data);
+    Matrix control(3, 1, control_data);
+
+    // Measurement is position
+    double measurement_data[3] = {0, 0, 0};
+    Matrix measurement(3, 1, measurement_data);
 
     for (int i = 0; i < 50; i++) {
-        Matrix control(0, 1);
         kf->predict(0.02, control);
         kf->update(measurement);
     }
 
     Matrix state = kf->getState();
-    double kf_accel_z = state(8, 0);
+    double kf_vel_z = state(5, 0);  // Velocity should remain ~0
 
-    fprintf(stderr, "Full chain at rest: sensor=%.2f -> mahony=%.2f -> kf=%.2f (expected 0)\n",
-            specific_force.z(), inertial_accel.z(), kf_accel_z);
+    fprintf(stderr, "Full chain at rest: sensor=%.2f -> mahony=%.2f -> kf_vz=%.2f (expected 0)\n",
+            specific_force.z(), inertial_accel.z(), kf_vel_z);
 
-    // Final KF estimate should be ~0
-    TEST_ASSERT_DOUBLE_WITHIN(2.0, 0.0, kf_accel_z);
+    // Final KF velocity estimate should be ~0 (no acceleration)
+    TEST_ASSERT_DOUBLE_WITHIN(1.0, 0.0, kf_vel_z);
 }
 
 void test_full_chain_boost() {
@@ -289,27 +318,36 @@ void test_full_chain_boost() {
     fprintf(stderr, "Full chain boost: sensor=%.2f -> mahony=%.2f\n",
             specific_force.z(), inertial_accel.z());
 
-    // 3. Feed to KF as measurement
-    double measurement_data[6] = {
-        0, 0, 0,
+    // 3. Feed to KF as CONTROL INPUT (not measurement)
+    double control_data[3] = {
         inertial_accel.x(), inertial_accel.y(), inertial_accel.z()
     };
-    Matrix measurement(6, 1, measurement_data);
+    Matrix control(3, 1, control_data);
+
+    // Start at origin
+    double measurement_data[3] = {0, 0, 0};
+    Matrix measurement(3, 1, measurement_data);
 
     for (int i = 0; i < 50; i++) {
-        Matrix control(0, 1);
         kf->predict(0.02, control);
+
+        // Update position measurement to match predicted trajectory
+        Matrix state = kf->getState();
+        measurement_data[2] = state(2, 0);  // Use predicted position
+        measurement = Matrix(3, 1, measurement_data);
+
         kf->update(measurement);
     }
 
     Matrix state = kf->getState();
-    double kf_accel_z = state(8, 0);
+    double kf_vel_z = state(5, 0);  // Should be accelerating upward
 
-    fprintf(stderr, "Full chain boost: sensor=%.2f -> mahony=%.2f -> kf=%.2f (expected 30)\n",
-            specific_force.z(), inertial_accel.z(), kf_accel_z);
+    fprintf(stderr, "Full chain boost: sensor=%.2f -> mahony=%.2f -> kf_vz=%.2f (expected ~30 m/s)\n",
+            specific_force.z(), inertial_accel.z(), kf_vel_z);
 
-    // Final KF estimate should be ~+30
-    TEST_ASSERT_DOUBLE_WITHIN(5.0, 30.0, kf_accel_z);
+    // After 50 iterations * 0.02s = 1 second at 30 m/s² accel
+    // Final KF velocity estimate should be ~+30 m/s
+    TEST_ASSERT_DOUBLE_WITHIN(10.0, 30.0, kf_vel_z);
 }
 
 int main(int argc, char **argv) {

@@ -25,9 +25,9 @@ void setUp(void) {
     fakeIMU.init();
 
     sensorManager = new SensorManager();
-    sensorManager->setPrimaryAccel(fakeIMU.getAccelSensor());
-    sensorManager->setPrimaryGyro(fakeIMU.getGyroSensor());
-    sensorManager->setPrimaryBaro(&fakeBaro);
+    sensorManager->setAccelSource(fakeIMU.getAccelSensor());
+    sensorManager->setGyroSource(fakeIMU.getGyroSensor());
+    sensorManager->setBaroSource(&fakeBaro);
     sensorManager->begin();
 
     // Create mock filters
@@ -62,17 +62,22 @@ void tearDown(void) {
 
 // Helper to set KF state and update RocketState
 void setStateAndUpdate(double altitude, double velocity, double accelZ, unsigned long timeMs) {
+    // DefaultKalmanFilter uses 6-state model: [px, py, pz, vx, vy, vz]
+    // Acceleration is NOT part of the state - it comes from orientation filter
     Matrix kfState = kalmanFilter->getState();
     kfState(2, 0) = altitude;   // pz (altitude AGL)
     kfState(5, 0) = velocity;   // vz (vertical velocity)
-    kfState(8, 0) = accelZ;     // az (z-axis acceleration)
     kalmanFilter->setState(kfState);
+
+    // Mock the orientation filter to return the desired acceleration
+    // This simulates what the real Mahony filter would provide
+    orientationFilter->setMockEarthAcceleration(Vector<3>(0, 0, accelZ));
 
     setMillis(timeMs);
     double timeSec = millis() / 1000.0;
 
     // Call both predictState and update to properly populate state variables
-    // predictState reads from KF and updates State::acceleration, position, velocity
+    // predictState reads from orientation filter and KF state
     // update does measurement update (but with mock KF it does nothing)
     state->predictState(timeSec);
     state->update(timeSec);
@@ -719,8 +724,10 @@ void test_complete_nominal_flight_sequence() {
     TEST_ASSERT_EQUAL(FlightStage::PAD_IDLE, state->getFlightStage());
 
     // 2. LIFTOFF -> BOOST
-    setStateAndUpdate(0.0, 0.0, -40.0, 0);
-    setStateAndUpdate(5.0, 10.0, -40.0, 120);
+    // Need to start at rest first, then apply high acceleration
+    setStateAndUpdate(0.0, 0.0, -9.81, 0);
+    setStateAndUpdate(0.0, 0.0, -40.0, 10);  // Start high accel timer at 10ms
+    setStateAndUpdate(5.0, 10.0, -40.0, 120); // Trigger at 120ms (>100ms sustained)
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
 
     // 3. BURNOUT -> COAST

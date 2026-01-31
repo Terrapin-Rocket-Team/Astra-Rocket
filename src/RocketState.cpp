@@ -56,10 +56,10 @@ namespace astra_rocket
         }
     }
 
-    void RocketState::update(double currentTimeSec)
+    bool RocketState::update(double currentTimeSec)
     {
         // Call parent implementation first - handles measurement update
-        State::update(currentTimeSec);
+        bool success = State::update(currentTimeSec);
 
         // Update time in current stage
         unsigned long currentMillis = (unsigned long)(currentTime * 1000.0);
@@ -68,6 +68,8 @@ namespace astra_rocket
         // Calculate rocket-specific derived values that depend on orientation
         calculateTilt();
         detectFlightStage();
+
+        return success;
     }
 
     void RocketState::calculateTilt()
@@ -142,7 +144,7 @@ namespace astra_rocket
                         // We are currently in CALIBRATING mode (Pad Snapping).
                         // We must switch to CORRECTING to enable Gyro integration and allow
                         // the State::updateOrientation logic to manage High-G handling.
-                        ahrs->setMode(MahonyMode::GYRO_ONLY);
+                        ahrs->setMode(MahonyMode::CORRECTING);
                         LOGI("Orientation filter switched to CORRECTING mode for flight.");
                     }
                 }
