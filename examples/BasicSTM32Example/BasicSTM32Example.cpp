@@ -28,12 +28,11 @@
 #include <AstraRocket.h>
 
 using namespace astra_rocket;
-
 // Create a custom configuration with LED status pins
 // Adjust the pin numbers based on your STM32H723 hardware setup
-AstraRocketConfig config = AstraRocketConfig()
-                               .withSensorStatusLEDPin(PC0)  // Adjust to your LED pin
-                               .withGPSStatusLEDPin(PC1);     // Adjust to your LED pin
+AstraRocketConfig config = AstraRocketConfig();
+//    .withSensorStatusLEDPin(PC0)  // Adjust to your LED pin
+//    .withGPSStatusLEDPin(PC1);     // Adjust to your LED pin
 
 // Create AstraRocket instance with custom configuration
 // Note: SD card configuration may need to be explicitly set for STM32

@@ -30,10 +30,10 @@
 using namespace astra_rocket;
 
 // Create a custom configuration with LED status pins
-AstraRocketConfig config = AstraRocketConfig()
-                               .withGPS(new MAX_M10S)
-                               .withSensorStatusLEDPin(32)
-                               .withGPSStatusLEDPin(31);
+AstraRocketConfig config = AstraRocketConfig();
+//    .withGPS(new MAX_M10S)
+//    .withSensorStatusLEDPin(32)
+//    .withGPSStatusLEDPin(31);
 
 // Create AstraRocket instance with custom configuration
 // Note: For Teensy 4.1, the built-in SD card will be auto-configured
