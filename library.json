@@ -26,7 +26,7 @@
         
         {
             "name": "Astra",
-            "version": "https://github.com/Terrapin-Rocket-Team/Astra.git#integrate-all-the-things"
+            "version": "https://github.com/Terrapin-Rocket-Team/Astra.git#new-sensor-api"
         }
     ],
     "frameworks": "arduino",
@@ -47,11 +47,6 @@
                 "flags": [
                     "-std=c++17",
                     "-DNATIVE=1"
-                ],
-                "srcFilter": [
-                    "+<*>",
-                    "-<AstraRocket.cpp>",
-                    "-<AstraRocketConfig.cpp>"
                 ]
             },
             "teensy": {
