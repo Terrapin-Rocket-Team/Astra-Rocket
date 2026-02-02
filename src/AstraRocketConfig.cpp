@@ -34,9 +34,9 @@ AstraRocketConfig::AstraRocketConfig()
       preflightLogRate(1.0),
       flightLogRate(50.0),
       postflightLogRate(1.0),
-      flashBackup(false),
+      flashBackup(false)
       #ifdef ENV_TEENSY
-      radioSerial(&Serial2)
+      ,radioSerial(&Serial2)
       #endif
 {
 }
