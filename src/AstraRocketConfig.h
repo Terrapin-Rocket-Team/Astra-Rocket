@@ -1,6 +1,5 @@
 #ifndef ASTRA_ROCKET_CONFIG_H
 #define ASTRA_ROCKET_CONFIG_H
-
 #include <Utils/AstraConfig.h>
 #include <Sensors/Baro/Barometer.h>
 #include <Sensors/GPS/GPS.h>
