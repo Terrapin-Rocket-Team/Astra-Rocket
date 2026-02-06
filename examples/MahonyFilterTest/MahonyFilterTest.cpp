@@ -42,6 +42,14 @@ const double MAHONY_KI = 0.001;    // Integral gain (gyro bias correction)
 const double UPDATE_RATE = 50.0;   // Hz (50 Hz = 20ms update period)
 const double DT = 1.0 / UPDATE_RATE;
 
+// ============ FLIGHT-LIKE BEHAVIOR ============
+// In real flight, accelerometer measurements include thrust/drag, so using accel
+// for attitude correction will "right" the filter toward the acceleration vector.
+// Enable this to use gyro-only updates when accel magnitude deviates from 1 g.
+const bool FLIGHT_LIKE_MODE = true;
+const double ACCEL_TRUST_G = 9.81;     // m/s^2
+const double ACCEL_TRUST_TOL = 1.5;    // m/s^2 tolerance around 1 g
+
 // ============ CALIBRATION SETTINGS ============
 const int CALIBRATION_SAMPLES = 100;  // Number of samples for initial calibration
 const unsigned long CALIBRATION_TIME = 2000;  // Calibration time in milliseconds (stationary)
@@ -282,10 +290,22 @@ void loop() {
         return;
     }
 
-    // Update filter in flight mode with 9-DoF
+    // Update filter in flight mode
     Quaternion q_before_update = mahony.getQuaternion();
 
-    mahony.update(accel, gyro, mag, DT);
+    double accelMag = accel.magnitude();
+    bool accelTrusted = fabs(accelMag - ACCEL_TRUST_G) < ACCEL_TRUST_TOL;
+
+    if (FLIGHT_LIKE_MODE && !accelTrusted) {
+        // High dynamics (thrust/drag): trust gyro only
+        mahony.update(gyro, DT);
+    } else if (mahony.isMagCalibrated()) {
+        // Normal operation: use 9-DoF if mag is calibrated
+        mahony.update(accel, gyro, mag, DT);
+    } else {
+        // Fallback to 6-DoF if mag isn't ready
+        mahony.update(accel, gyro, DT);
+    }
 
     // Get orientation
     Quaternion q = mahony.getQuaternion();

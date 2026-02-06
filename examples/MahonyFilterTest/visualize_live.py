@@ -8,6 +8,7 @@ Usage:
 """
 
 import sys
+import math
 import serial
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,11 +16,47 @@ from matplotlib.animation import FuncAnimation
 from mpl_toolkits.mplot3d import Axes3D
 from collections import deque
 
+def quat_conj(q):
+    return np.array([q[0], -q[1], -q[2], -q[3]], dtype=float)
+
+def quat_mul(a, b):
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return np.array([
+        aw * bw - ax * bx - ay * by - az * bz,
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+    ], dtype=float)
+
+def quat_normalize(q):
+    norm = math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
+    if norm == 0:
+        return q
+    return q / norm
+
+def quat_to_euler_deg(q):
+    qw, qx, qy, qz = q
+    # Match MahonyFilterTest.cpp formulas (roll, pitch, yaw)
+    roll = math.atan2(2.0 * (qw * qx + qy * qz),
+                      1.0 - 2.0 * (qx * qx + qy * qy))
+    sinp = 2.0 * (qw * qy - qz * qx)
+    if abs(sinp) >= 1.0:
+        pitch = math.copysign(math.pi / 2.0, sinp)
+    else:
+        pitch = math.asin(sinp)
+    yaw = math.atan2(2.0 * (qw * qz + qx * qy),
+                     1.0 - 2.0 * (qy * qy + qz * qz))
+    return (math.degrees(roll), math.degrees(pitch), math.degrees(yaw))
+
+
 class LiveVisualizer:
-    def __init__(self, port, baud=115200, buffer_size=200):
+    def __init__(self, port, baud=115200, buffer_size=200, relative=True):
         self.port = port
         self.baud = baud
         self.buffer_size = buffer_size
+        self.relative = relative
+        self.q_ref = None
 
         # Data buffers
         self.time_buffer = deque(maxlen=buffer_size)
@@ -50,7 +87,8 @@ class LiveVisualizer:
     def setup_figure(self):
         self.fig = plt.figure(figsize=(16, 10))
         gs = self.fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
-        self.fig.suptitle(f'Mahony Filter Live - {self.port}', fontsize=16, fontweight='bold')
+        mode = "Relative to Start" if self.relative else "Absolute"
+        self.fig.suptitle(f'Mahony Filter Live ({mode}) - {self.port}', fontsize=16, fontweight='bold')
 
         # 3D Orientation (top-left, spanning 2 rows)
         self.ax_3d = self.fig.add_subplot(gs[0:2, 0], projection='3d')
@@ -122,7 +160,15 @@ class LiveVisualizer:
                 gx, gy, gz = float(parts[4]), float(parts[5]), float(parts[6])
                 mx, my, mz = float(parts[7]), float(parts[8]), float(parts[9])
                 qw, qx, qy, qz = float(parts[10]), float(parts[11]), float(parts[12]), float(parts[13])
-                roll, pitch, yaw = float(parts[14]), float(parts[15]), float(parts[16])
+                q = np.array([qw, qx, qy, qz], dtype=float)
+
+                if self.relative:
+                    if self.q_ref is None:
+                        self.q_ref = q
+                    q = quat_mul(q, quat_conj(self.q_ref))
+                    q = quat_normalize(q)
+
+                roll, pitch, yaw = quat_to_euler_deg(q)
 
                 self.time_buffer.append(time)
                 self.ax_buffer.append(ax)
@@ -134,10 +180,10 @@ class LiveVisualizer:
                 self.mx_buffer.append(mx)
                 self.my_buffer.append(my)
                 self.mz_buffer.append(mz)
-                self.qw_buffer.append(qw)
-                self.qx_buffer.append(qx)
-                self.qy_buffer.append(qy)
-                self.qz_buffer.append(qz)
+                self.qw_buffer.append(q[0])
+                self.qx_buffer.append(q[1])
+                self.qy_buffer.append(q[2])
+                self.qz_buffer.append(q[3])
                 self.roll_buffer.append(roll)
                 self.pitch_buffer.append(pitch)
                 self.yaw_buffer.append(yaw)
@@ -275,11 +321,17 @@ class LiveVisualizer:
         self.ser.close()
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print("Usage: python visualize_live.py <serial_port>")
-        print("Example: python visualize_live.py COM8")
-        sys.exit(1)
+    import argparse
 
-    port = sys.argv[1]
-    viz = LiveVisualizer(port)
+    parser = argparse.ArgumentParser(description="Mahony filter live visualization")
+    parser.add_argument("port", help="Serial port (e.g., COM8 or /dev/ttyACM0)")
+    parser.add_argument("--baud", type=int, default=115200, help="Serial baud rate (default: 115200)")
+    parser.add_argument("--relative", dest="relative", action="store_true",
+                        help="Show orientation relative to first sample (default)")
+    parser.add_argument("--absolute", dest="relative", action="store_false",
+                        help="Show absolute orientation")
+    parser.set_defaults(relative=True)
+    args = parser.parse_args()
+
+    viz = LiveVisualizer(args.port, baud=args.baud, relative=args.relative)
     viz.run()
