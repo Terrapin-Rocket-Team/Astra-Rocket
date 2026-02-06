@@ -308,7 +308,8 @@ void loop() {
     }
 
     // Get orientation
-    Quaternion q = mahony.getQuaternion();
+    Quaternion q = mahony.getQuaternion().conjugate();  // use for visualization/Euler only
+
 
     // Check for NaN in quaternion
     if (isnan(q.w()) || isnan(q.x()) || isnan(q.y()) || isnan(q.z())) {
