@@ -3,7 +3,7 @@
 
 #include <LIS3MDL.h>
 #include <Wire.h>
-#include "../../.pio/libdeps/native/TRT-Astra/src/Sensors/Mag/Mag.h"
+#include "Sensors/Mag/Mag.h"
 
 namespace astra
 {

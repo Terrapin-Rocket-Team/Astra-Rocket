@@ -62,6 +62,7 @@ bool magCalibrationComplete = false;
 int calibrationCount = 0;
 
 void setup() {
+    magnetometer.setMountingOrientation(MountingOrientation::FLIP_XY);  // Adjust based on your mounting
     Serial.begin(115200);
     while (!Serial && millis() < 5000) {
         delay(10);
