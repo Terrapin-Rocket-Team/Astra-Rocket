@@ -31,12 +31,12 @@ namespace astra
         {
         }
 
-        bool init() override
+        int init() override
         {
             // Initialize the LIS3MDL
             if (!magnetometer.init(LIS3MDL::device_LIS3MDL, sa1_state))
             {
-                return false;
+                return -1;
             }
 
             // Configure for high-performance mode
@@ -68,10 +68,10 @@ namespace astra
             // Read a test sample to verify communication
             magnetometer.read();
 
-            return true;
+            return 0;
         }
 
-        bool read() override
+        int read() override
         {
             // Read raw magnetometer data
             magnetometer.read();
@@ -88,7 +88,7 @@ namespace astra
             mag.y() = magnetometer.m.y * SCALE;
             mag.z() = magnetometer.m.z * SCALE;
 
-            return true;
+            return 0;
         }
 
         /**

@@ -50,7 +50,7 @@ const unsigned long MAG_CALIBRATION_TIME = 10000;  // Magnetometer calibration t
 // ============ GLOBAL OBJECTS ============
 SensorManager sensorManager;
 MahonyAHRS mahony(MAHONY_KP, MAHONY_KI);
-BMI088 bmi088("BMI088", Wire, BMI088_ACCEL_ADDR, BMI088_GYRO_ADDR);
+BMI088 bmi088("BMI088", &Wire, BMI088_ACCEL_ADDR, BMI088_GYRO_ADDR);
 LIS3MDL_Wrapper magnetometer("LIS3MDL", LIS3MDL_SA1_STATE);
 
 // Timing
@@ -77,7 +77,7 @@ void setup() {
 
     // Initialize BMI088
     Serial.print("# Initializing BMI088... ");
-    if (!bmi088.begin()) {
+    if (bmi088.init() != 0) {
         Serial.println("FAILED!");
         Serial.println("# ERROR: Could not initialize BMI088");
         while (1) {
@@ -88,7 +88,7 @@ void setup() {
 
     // Initialize magnetometer (REQUIRED)
     Serial.print("# Initializing LIS3MDL... ");
-    if (!magnetometer.begin()) {
+    if (magnetometer.init() != 0) {
         Serial.println("FAILED!");
         Serial.println("# ERROR: Magnetometer is REQUIRED for this test");
         while (1) {
@@ -145,7 +145,7 @@ void setup() {
     Serial.println("# === CALIBRATION PHASE 1: STATIONARY ===");
     Serial.println("# Keep board STATIONARY for gyro bias calibration!");
 
-    mahony.setMode(MahonyMode::CALIBRATING);
+    // Mahony filter no longer has modes; it is always ready
     startTime = millis();
     lastUpdate = millis();
 }
@@ -215,30 +215,6 @@ void loop() {
 
         // Check if stationary calibration time has elapsed
         if (currentTime - startTime >= CALIBRATION_TIME) {
-            mahony.finalizeCalibration();
-
-            Quaternion q_before_lock = mahony.getQuaternion();
-            Serial.print("# Quat before lock: ");
-            Serial.print(q_before_lock.w(), 4);
-            Serial.print(", ");
-            Serial.print(q_before_lock.x(), 4);
-            Serial.print(", ");
-            Serial.print(q_before_lock.y(), 4);
-            Serial.print(", ");
-            Serial.println(q_before_lock.z(), 4);
-
-            mahony.lockFrame();
-
-            Quaternion q_after_lock = mahony.getQuaternion();
-            Serial.print("# Quat after lock: ");
-            Serial.print(q_after_lock.w(), 4);
-            Serial.print(", ");
-            Serial.print(q_after_lock.x(), 4);
-            Serial.print(", ");
-            Serial.print(q_after_lock.y(), 4);
-            Serial.print(", ");
-            Serial.println(q_after_lock.z(), 4);
-
             calibrationComplete = true;
 
             Serial.println("# Phase 1 complete!");
@@ -267,7 +243,7 @@ void loop() {
             Serial.print(", ");
             Serial.println(q_before_finalize.z(), 4);
 
-            mahony.finalizeCalibration();  // This will compute mag calibration
+            mahony.finalizeMagCalibration();  // This will compute mag calibration
 
             Quaternion q_after_finalize = mahony.getQuaternion();
             Serial.print("# Quat after finalize: ");
@@ -285,7 +261,7 @@ void loop() {
                 Serial.println("# WARNING: Mag calibration failed!");
             }
 
-            mahony.setMode(MahonyMode::CORRECTING);
+            // Mahony filter runs in continuous correction mode
 
             Quaternion q_after_mode_change = mahony.getQuaternion();
             Serial.print("# Quat after mode change: ");

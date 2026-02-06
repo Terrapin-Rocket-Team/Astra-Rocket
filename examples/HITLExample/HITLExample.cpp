@@ -16,7 +16,6 @@
 
 #include <Arduino.h>
 #include <AstraRocket.h>
-#include <Sensors/SensorManager/SensorManager.h>
 
 using namespace astra_rocket;
 
@@ -52,8 +51,7 @@ void setup()
     // Configure rocket for HITL mode
     // NOTE: config must be static because AstraRocket stores a reference to it
     static AstraRocketConfig config;
-    config.withHITL(true) // Enable HITL mode
-        .withSensorManager(new SensorManager());
+    config.withHITL(true); // Enable HITL mode
 
     // Create rocket with HITL configuration
     rocket = new AstraRocket(config);

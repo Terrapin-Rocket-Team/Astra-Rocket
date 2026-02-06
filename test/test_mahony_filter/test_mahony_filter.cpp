@@ -59,10 +59,7 @@ void test_constant_rotation() {
         mahony->update(accel, gyro, 0.02);
     }
 
-    // Finalize calibration and lock frame
-    mahony->finalizeCalibration();
-    mahony->lockFrame();
-    mahony->setMode(MahonyMode::CORRECTING);
+    // Continue with default filter behavior (no frame locking)
 
     // Now apply constant rotation around Z-axis: 90 deg/s = π/2 rad/s
     gyro = Vector<3>(0, 0, M_PI / 2.0);
@@ -91,9 +88,7 @@ void test_tilt_detection() {
         mahony->update(accel, gyro, 0.02);
     }
 
-    mahony->finalizeCalibration();
-    mahony->lockFrame();
-    mahony->setMode(MahonyMode::CORRECTING);
+    // Continue with default filter behavior (no frame locking)
 
     // Tilt 45 degrees forward (pitch)
     // Acceleration vector rotates: a = [sin(45°)*g, 0, -cos(45°)*g]
@@ -156,10 +151,7 @@ void test_live_sensor_stream() {
         time += dt;
     }
 
-    // Finalize calibration and lock frame at liftoff
-    mahony->finalizeCalibration();
-    mahony->lockFrame();
-    mahony->setMode(MahonyMode::CORRECTING);
+    // Continue with default filter behavior (no frame locking)
 
     // Phase 2: Liftoff with rotation (2-4s)
     // Simulate rocket spinning and tilting during ascent

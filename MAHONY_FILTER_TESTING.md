@@ -220,19 +220,6 @@ The filter uses **ENU (East-North-Up)** coordinates:
 
 ## Advanced Features
 
-### Switch Filter Modes
-
-```cpp
-// During calibration (on pad)
-mahony.setMode(MahonyMode::CALIBRATING);
-
-// During flight (trust accel+gyro)
-mahony.setMode(MahonyMode::CORRECTING);
-
-// During high-G (gyro only)
-mahony.setMode(MahonyMode::GYRO_ONLY);
-```
-
 ### Magnetometer Calibration (9-DoF)
 
 ```cpp
@@ -240,8 +227,14 @@ mahony.setMode(MahonyMode::GYRO_ONLY);
 mahony.collectMagCalibrationSample(mag);
 
 // Finalize when done
-mahony.finalizeCalibration();
+mahony.finalizeMagCalibration();
 ```
+
+### Gyro-Only Handling (Application Layer)
+
+If you need to ignore accelerometer corrections during high-G,
+do it in your application logic (e.g., RocketState) by calling the
+gyro-only update path on the filter.
 
 ### Get Earth-Frame Acceleration
 

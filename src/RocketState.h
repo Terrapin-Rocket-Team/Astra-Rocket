@@ -4,6 +4,7 @@
 #include <State/State.h>
 #include <Filters/LinearKalmanFilter.h>
 #include <Sensors/Sensor.h>
+#include <Sensors/SensorManager/SensorManager.h>
 #include "FlightStage.h"
 
 using namespace astra;
@@ -59,9 +60,39 @@ public:
      */
     double getTimeInStage() const { return timeInCurrentStage; }
 
-    bool update(double currentTimeSec = -1) override;
+    /**
+     * Update orientation estimate from gyro and accel data
+     * Allows RocketState to enforce gyro-only mode after liftoff
+     */
+    void updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, double dt) override;
+
+    /**
+     * Update orientation estimate from gyro, accel, and mag data (9-DOF)
+     */
+    void updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, const Vector<3> &mag, double dt) override;
+
+    int update(double currentTimeSec = -1) override;
+
+    // Test/simulation helper: pull KF state into RocketState without full Astra loop
+    void predictState(double currentTimeSec = -1);
+
+    // Test helper: accepts a SensorManager to match existing tests
+    RocketState &withSensorManager(SensorManager *sm);
+
+    // Test helper: force frame lock without waiting for liftoff detection
+    void lockFrameForTest();
 
 private:
+    enum UpAxis
+    {
+        POS_X,
+        NEG_X,
+        POS_Y,
+        NEG_Y,
+        POS_Z,
+        NEG_Z
+    };
+
     // Flight stage tracking
     FlightStage currentStage;
     FlightStage previousStage;
@@ -70,10 +101,25 @@ private:
 
     // Orientation tracking
     double offVerticalAngle;     // Angle from vertical axis
+    Quaternion mountQuat_rb;     // Rocket->Body mapping
+    UpAxis currentUpAxis;
+    UpAxis pendingUpAxis;
+    int axisStableCount;
+    bool frameLocked;
+    bool forceGyroOnly;
+    SensorManager *sensorManager;
 
     // Helper methods
     void detectFlightStage();
     void calculateTilt();
+    void updateMountingAlignment();
+    void computeMountingQuaternion(UpAxis axis);
+    UpAxis chooseUpAxis(double &bestDot) const;
+    Quaternion getRocketOrientation() const;
+
+    // Alignment tuning
+    static constexpr double AXIS_SWITCH_DOT_THRESHOLD = 0.90;
+    static constexpr int AXIS_SWITCH_STABLE_COUNT = 10;
 
     // Stage detection thresholds (can be made configurable)
     static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0 * 9.81;      // m/s² (3.0G)

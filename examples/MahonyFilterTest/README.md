@@ -226,7 +226,7 @@ pip install pyserial
 ### Yaw drifts continuously (BMI088)
 - **Expected behavior** - no magnetometer
 - Use BNO055 for yaw stabilization
-- Or switch to `MahonyMode::GYRO_ONLY` in flight
+- If you need gyro-only handling during high-G, do it in the application layer
 
 ### Jittery/noisy output
 - Increase Mahony `Kp` gain for faster response
@@ -305,16 +305,6 @@ const double UPDATE_RATE = 50.0;   // Hz
 
 ## Advanced Usage
 
-### Switch Modes During Flight
-
-```cpp
-// During boost/high-G
-mahony.setMode(MahonyMode::GYRO_ONLY);  // Ignore bad accelerometer data
-
-// During coast
-mahony.setMode(MahonyMode::CORRECTING);  // Use accel+gyro fusion
-```
-
 ### Get Earth Frame Acceleration
 
 ```cpp
@@ -328,10 +318,6 @@ Vector<3> earthAccel = mahony.getEarthAcceleration(accel);
 ```cpp
 if (mahony.isReady()) {
     // Orientation is valid
-}
-
-if (mahony.isFrameLocked()) {
-    // Reference frame is locked (for relative orientation)
 }
 
 if (mahony.isMagCalibrated()) {

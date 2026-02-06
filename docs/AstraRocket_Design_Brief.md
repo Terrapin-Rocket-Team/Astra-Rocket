@@ -46,6 +46,10 @@ Implements flight stage detection state machine and tracks rocket-specific telem
 - Off-vertical angle
 - Flight stage, time in current stage
 
+**Orientation handling:**
+- On pad, the system continuously snaps to the closest body axis to "up" (with hysteresis) to infer mounting orientation.
+- At liftoff, the frame is locked and the orientation filter runs gyro-only for the remainder of flight.
+
 All thresholds are hardcoded in [RocketState.h:134-147](src/RocketState.h#L134-L147). Future: make configurable via AstraRocketConfig.
 
 ### 2. AstraRocket (main wrapper class)

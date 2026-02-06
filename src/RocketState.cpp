@@ -6,6 +6,7 @@
 #include <Sensors/Baro/Barometer.h>
 #include <Sensors/GPS/GPS.h>
 #include <Sensors/SensorManager/SensorManager.h>
+#include <Math/Matrix.h>
 
 using namespace astra;
 
@@ -19,6 +20,13 @@ namespace astra_rocket
           timeInCurrentStage(0),
           stageStartTime(0),
           offVerticalAngle(0),
+          mountQuat_rb(1.0, 0.0, 0.0, 0.0),
+          currentUpAxis(POS_Z),
+          pendingUpAxis(POS_Z),
+          axisStableCount(0),
+          frameLocked(false),
+          forceGyroOnly(false),
+          sensorManager(nullptr),
           highAccelStartTime(0),
           lowAccelStartTime(0),
           lowVelocityStartTime(0),
@@ -56,20 +64,108 @@ namespace astra_rocket
         }
     }
 
-    bool RocketState::update(double currentTimeSec)
+    void RocketState::updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, double dt)
+    {
+        if (!orientationFilter)
+            return;
+
+        if (forceGyroOnly)
+        {
+            orientationFilter->update(gyro, dt);
+            orientation = orientationFilter->getQuaternion();
+            Vector<3> earthAccel = orientationFilter->getEarthAcceleration(accel);
+            acceleration.x() = earthAccel.x();
+            acceleration.y() = earthAccel.y();
+            acceleration.z() = earthAccel.z();
+            return;
+        }
+
+        State::updateOrientation(gyro, accel, dt);
+    }
+
+    void RocketState::updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, const Vector<3> &mag, double dt)
+    {
+        if (!orientationFilter)
+            return;
+
+        if (forceGyroOnly)
+        {
+            orientationFilter->update(gyro, dt);
+            orientation = orientationFilter->getQuaternion();
+            Vector<3> earthAccel = orientationFilter->getEarthAcceleration(accel);
+            acceleration.x() = earthAccel.x();
+            acceleration.y() = earthAccel.y();
+            acceleration.z() = earthAccel.z();
+            return;
+        }
+
+        State::updateOrientation(gyro, accel, mag, dt);
+    }
+
+    int RocketState::update(double currentTimeSec)
     {
         // Call parent implementation first - handles measurement update
-        bool success = State::update(currentTimeSec);
+        int success = State::update(currentTimeSec);
 
         // Update time in current stage
         unsigned long currentMillis = (unsigned long)(currentTime * 1000.0);
         timeInCurrentStage = (currentMillis - stageStartTime) / 1000.0;
+
+        if (!frameLocked && currentStage == PAD_IDLE)
+        {
+            updateMountingAlignment();
+        }
 
         // Calculate rocket-specific derived values that depend on orientation
         calculateTilt();
         detectFlightStage();
 
         return success;
+    }
+
+    void RocketState::predictState(double currentTimeSec)
+    {
+        if (currentTimeSec == -1)
+            currentTimeSec = millis() / 1000.0;
+
+        currentTime = currentTimeSec;
+
+        if (orientationFilter && orientationFilter->isReady())
+        {
+            orientation = orientationFilter->getQuaternion();
+        }
+
+        if (filter)
+        {
+            Matrix state = filter->getState();
+            position.x() = state(0, 0);
+            position.y() = state(1, 0);
+            position.z() = state(2, 0);
+            velocity.x() = state(3, 0);
+            velocity.y() = state(4, 0);
+            velocity.z() = state(5, 0);
+        }
+
+        if (orientationFilter)
+        {
+            Vector<3> earthAccel = orientationFilter->getEarthAcceleration(Vector<3>(0, 0, 0));
+            acceleration.x() = earthAccel.x();
+            acceleration.y() = earthAccel.y();
+            acceleration.z() = earthAccel.z();
+        }
+    }
+
+    RocketState &RocketState::withSensorManager(SensorManager *sm)
+    {
+        sensorManager = sm;
+        return *this;
+    }
+
+    void RocketState::lockFrameForTest()
+    {
+        computeMountingQuaternion(currentUpAxis);
+        frameLocked = true;
+        forceGyroOnly = true;
     }
 
     void RocketState::calculateTilt()
@@ -81,14 +177,13 @@ namespace astra_rocket
         // Updated to use isReady() (was isInitialized)
         if (ahrs && ahrs->isReady())
         {
-            // Get the current orientation quaternion
-            Quaternion q = orientation;
+            Quaternion q = getRocketOrientation();
 
-            // Rocket body Z-axis in body frame (pointing along rocket, up in ENU)
-            Vector<3> bodyZ(0, 0, 1);
+            // Rocket body Z-axis in rocket frame (pointing along rocket, up in ENU)
+            Vector<3> rocketZ(0, 0, 1);
 
-            // Rotate body Z into earth frame to see which way rocket is pointing
-            Vector<3> rocketDir = q.rotateVector(bodyZ);
+            // Rotate rocket Z into earth frame to see which way rocket is pointing
+            Vector<3> rocketDir = q.rotateVector(rocketZ);
 
             // Earth vertical reference (up in ENU is +Z)
             Vector<3> verticalRef(0, 0, 1);
@@ -97,6 +192,137 @@ namespace astra_rocket
             double cosAngle = rocketDir.dot(verticalRef);
             offVerticalAngle = acos(fmax(-1.0, fmin(1.0, cosAngle))) * 180.0 / M_PI;
         }
+    }
+
+    void RocketState::updateMountingAlignment()
+    {
+        double bestDot = 0.0;
+        UpAxis candidate = chooseUpAxis(bestDot);
+
+        if (candidate == currentUpAxis)
+        {
+            axisStableCount = 0;
+            pendingUpAxis = currentUpAxis;
+            return;
+        }
+
+        if (bestDot < AXIS_SWITCH_DOT_THRESHOLD)
+        {
+            axisStableCount = 0;
+            pendingUpAxis = currentUpAxis;
+            return;
+        }
+
+        if (candidate == pendingUpAxis)
+        {
+            axisStableCount++;
+        }
+        else
+        {
+            pendingUpAxis = candidate;
+            axisStableCount = 1;
+        }
+
+        if (axisStableCount >= AXIS_SWITCH_STABLE_COUNT)
+        {
+            currentUpAxis = candidate;
+            axisStableCount = 0;
+            computeMountingQuaternion(currentUpAxis);
+        }
+    }
+
+    RocketState::UpAxis RocketState::chooseUpAxis(double &bestDot) const
+    {
+        Vector<3> up(0, 0, 1);
+        Vector<3> bodyX = orientation.rotateVector(Vector<3>(1, 0, 0));
+        Vector<3> bodyY = orientation.rotateVector(Vector<3>(0, 1, 0));
+        Vector<3> bodyZ = orientation.rotateVector(Vector<3>(0, 0, 1));
+
+        struct AxisDot
+        {
+            UpAxis axis;
+            double dot;
+        };
+
+        AxisDot candidates[6] = {
+            {POS_X, bodyX.dot(up)},
+            {NEG_X, -bodyX.dot(up)},
+            {POS_Y, bodyY.dot(up)},
+            {NEG_Y, -bodyY.dot(up)},
+            {POS_Z, bodyZ.dot(up)},
+            {NEG_Z, -bodyZ.dot(up)}};
+
+        UpAxis bestAxis = candidates[0].axis;
+        bestDot = candidates[0].dot;
+        for (int i = 1; i < 6; i++)
+        {
+            if (candidates[i].dot > bestDot)
+            {
+                bestDot = candidates[i].dot;
+                bestAxis = candidates[i].axis;
+            }
+        }
+
+        return bestAxis;
+    }
+
+    void RocketState::computeMountingQuaternion(UpAxis axis)
+    {
+        Vector<3> bodyZ;
+        switch (axis)
+        {
+        case POS_X:
+            bodyZ = Vector<3>(1, 0, 0);
+            break;
+        case NEG_X:
+            bodyZ = Vector<3>(-1, 0, 0);
+            break;
+        case POS_Y:
+            bodyZ = Vector<3>(0, 1, 0);
+            break;
+        case NEG_Y:
+            bodyZ = Vector<3>(0, -1, 0);
+            break;
+        case POS_Z:
+            bodyZ = Vector<3>(0, 0, 1);
+            break;
+        case NEG_Z:
+            bodyZ = Vector<3>(0, 0, -1);
+            break;
+        }
+
+        Vector<3> bodyX(1, 0, 0);
+        // If body X is the up axis, use body Y as rocket forward
+        if (fabs(bodyZ.dot(bodyX)) > 0.9)
+        {
+            bodyX = Vector<3>(0, 1, 0);
+        }
+
+        Vector<3> bodyY = bodyZ.cross(bodyX);
+        bodyY.normalize();
+        bodyX = bodyY.cross(bodyZ);
+        bodyX.normalize();
+
+        Matrix m(3, 3);
+        m(0, 0) = bodyX.x();
+        m(0, 1) = bodyY.x();
+        m(0, 2) = bodyZ.x();
+        m(1, 0) = bodyX.y();
+        m(1, 1) = bodyY.y();
+        m(1, 2) = bodyZ.y();
+        m(2, 0) = bodyX.z();
+        m(2, 1) = bodyY.z();
+        m(2, 2) = bodyZ.z();
+
+        Quaternion q;
+        q.fromMatrix(m);
+        q.normalize();
+        mountQuat_rb = q;
+    }
+
+    Quaternion RocketState::getRocketOrientation() const
+    {
+        return orientation * mountQuat_rb;
     }
 
     void RocketState::detectFlightStage()
@@ -125,27 +351,13 @@ namespace astra_rocket
                 {
                     newStage = BOOST;
                     LOGI("LIFTOFF DETECTED! Vertical accel: %0.2f G", acceleration.z());
-                    fprintf(stderr, "DEBUG RocketState: LIFTOFF DETECTED! Locking orientation frame...\n");
 
-                    // --- CRITICAL ORIENTATION UPDATE ---
-                    MahonyAHRS *ahrs = getOrientationFilter();
-                    if (ahrs)
+                    if (!frameLocked)
                     {
-                        // 1. Lock the reference frame.
-                        // This takes the current "Up" (which we've been snapping to on the pad)
-                        // and locks it as the permanent Earth Z-axis reference.
-                        if (!ahrs->isFrameLocked())
-                        {
-                            ahrs->lockFrame();
-                            LOGI("Orientation filter frame locked at launch");
-                        }
-
-                        // 2. Switch Mode to CORRECTING.
-                        // We are currently in CALIBRATING mode (Pad Snapping).
-                        // We must switch to CORRECTING to enable Gyro integration and allow
-                        // the State::updateOrientation logic to manage High-G handling.
-                        ahrs->setMode(MahonyMode::CORRECTING);
-                        LOGI("Orientation filter switched to CORRECTING mode for flight.");
+                        computeMountingQuaternion(currentUpAxis);
+                        frameLocked = true;
+                        forceGyroOnly = true;
+                        LOGI("Orientation frame locked at launch (gyro-only).");
                     }
                 }
             }

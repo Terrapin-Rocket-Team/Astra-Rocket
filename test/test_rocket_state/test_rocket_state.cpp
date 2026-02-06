@@ -241,6 +241,34 @@ void test_off_vertical_angle_zero_acceleration() {
     TEST_ASSERT_EQUAL_DOUBLE(0.0, angle);
 }
 
+void test_pad_alignment_and_frame_lock() {
+    // Body +X points up (rotate -90 deg about Y)
+    Quaternion q;
+    q.fromAxisAngle(Vector<3>(0, 1, 0), -M_PI / 2.0);
+    orientationFilter->setMockOrientation(q);
+
+    // Hold on pad long enough to pass hysteresis
+    for (int i = 0; i < 12; i++) {
+        setStateAndUpdate(0.0, 0.0, -9.81, 100 + i * 20);
+    }
+
+    double alignedAngle = state->getOffVerticalAngle();
+    TEST_ASSERT_DOUBLE_WITHIN(5.0, 0.0, alignedAngle);
+
+    // Lock frame for test (simulate liftoff)
+    state->setFlightStage(FlightStage::BOOST);
+    state->lockFrameForTest();
+
+    // Change orientation to identity; locked frame should preserve previous mapping
+    orientationFilter->setMockOrientation(Quaternion(1, 0, 0, 0));
+    for (int i = 0; i < 12; i++) {
+        setStateAndUpdate(0.0, 0.0, 40.0, 700 + i * 20);
+    }
+
+    double lockedAngle = state->getOffVerticalAngle();
+    TEST_ASSERT_TRUE(lockedAngle > 45.0);
+}
+
 // ===== TIME IN STAGE EDGE CASES =====
 
 void test_time_in_stage_rollover() {
@@ -370,6 +398,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_off_vertical_angle_vertical_flight);
     RUN_TEST(test_off_vertical_angle_horizontal_flight);
     RUN_TEST(test_off_vertical_angle_zero_acceleration);
+    RUN_TEST(test_pad_alignment_and_frame_lock);
 
     // Time in stage
     RUN_TEST(test_time_in_stage_rollover);

@@ -110,34 +110,6 @@ public:
      */
     AstraRocketConfig& withFlashBackup(bool enable);
 
-    // ===== Status Indicators Configuration =====
-
-    /**
-     * Enable buzzer feedback for flight events
-     * Default: true
-     */
-    AstraRocketConfig& withBuzzerFeedback(bool enable);
-
-    /**
-     * Set status LED pin
-     * Default: LED_BUILTIN
-     */
-    AstraRocketConfig& withLEDStatusPin(int pin);
-
-    /**
-     * Set sensor status LED pin
-     * Shows status of all sensors except GPS
-     * Default: -1 (disabled)
-     */
-    AstraRocketConfig& withSensorStatusLEDPin(int pin);
-
-    /**
-     * Set GPS status LED pin
-     * Shows GPS initialization and fix status
-     * Default: -1 (disabled)
-     */
-    AstraRocketConfig& withGPSStatusLEDPin(int pin);
-
     // ===== Radio Configuration =====
 
     /**
@@ -165,7 +137,7 @@ public:
     double getPostflightLogRate() const { return postflightLogRate; }
     bool getFlashBackup() const { return flashBackup; }
 
-    SensorManager *getSensorManager() const { return sensorManager; }
+    SensorManager *getSensorManager() { return &sensorManager; }
 
     SerialUART_t* getRadioSerial() const { return radioSerial; }
 

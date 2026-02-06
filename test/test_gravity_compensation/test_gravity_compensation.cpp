@@ -20,17 +20,6 @@ DefaultKalmanFilter* kf;
 
 void setUp(void) {
     mahony = new MahonyAHRS();
-    mahony->setMode(MahonyMode::CALIBRATING);
-
-    // Calibrate with "at rest" accelerometer reading
-    Vector<3> accel_at_rest(0, 0, 9.81);  // Specific force pointing up
-    Vector<3> gyro_zero(0, 0, 0);
-
-    // Accumulate calibration samples
-    for (int i = 0; i < 200; i++) {
-        mahony->update(accel_at_rest, gyro_zero, 0.01);
-    }
-    mahony->finalizeCalibration();
 
     kf = new DefaultKalmanFilter();
     kf->initialize();
@@ -102,10 +91,6 @@ void test_mahony_conversion_at_rest() {
     Quaternion q = mahony->getQuaternion();
     fprintf(stderr, "\n[DEBUG] Mahony quaternion: w=%.3f, x=%.3f, y=%.3f, z=%.3f\n",
             q.w(), q.x(), q.y(), q.z());
-
-    // Check mode
-    fprintf(stderr, "[DEBUG] Mahony mode: %d (0=CALIBRATING, 1=CORRECTING, 2=GYRO_ONLY)\n",
-            (int)mahony->getMode());
 
     Vector<3> inertial_accel = mahony->getEarthAcceleration(specific_force);
 

@@ -51,12 +51,23 @@ class TCPLink(FlightComputerLink):
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind((host, port))
         self.server.listen(1)
-        
+        self.server.settimeout(1.0)  # 1 second timeout for accept
+
         print(f"[Link] SITL Server listening on {host}:{port}...")
-        # Blocking accept (we wait for FC to connect)
-        self.conn, addr = self.server.accept()
-        self.conn.setblocking(False) # Non-blocking for data transfer
-        print(f"[Link] Flight Software connected from {addr}")
+        # Accept with timeout to allow Ctrl+C interruption
+        self.conn = None
+        try:
+            while self.conn is None:
+                try:
+                    self.conn, addr = self.server.accept()
+                    self.conn.setblocking(False) # Non-blocking for data transfer
+                    print(f"[Link] Flight Software connected from {addr}")
+                except socket.timeout:
+                    # Timeout allows KeyboardInterrupt to be detected
+                    continue
+        except KeyboardInterrupt:
+            self.server.close()
+            raise ConnectionError("Connection interrupted by user")
         self._buffer = b''
 
     def send(self, data: bytes):

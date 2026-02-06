@@ -12,12 +12,19 @@
 
 namespace astra_rocket
 {
+    AstraRocket *AstraRocket::s_activeInstance = nullptr;
+
     AstraRocket::AstraRocket(AstraRocketConfig &cfg)
         : config(cfg),
           astraSys(nullptr),
           rocketState(nullptr),
           kalmanFilter(nullptr),
           orientationFilter(nullptr),
+          hitlAccel(nullptr),
+          hitlGyro(nullptr),
+          hitlMag(nullptr),
+          hitlBaro(nullptr),
+          hitlGps(nullptr),
           dataSinks(nullptr),
           eventSinks(nullptr),
           numDataSinks(0),
@@ -29,6 +36,8 @@ namespace astra_rocket
 
     AstraRocket::~AstraRocket()
     {
+        if (s_activeInstance == this)
+            s_activeInstance = nullptr;
         if (astraSys)
             delete astraSys;
         if (rocketState)
@@ -37,6 +46,16 @@ namespace astra_rocket
             delete kalmanFilter;
         if (orientationFilter)
             delete orientationFilter;
+        if (hitlAccel)
+            delete hitlAccel;
+        if (hitlGyro)
+            delete hitlGyro;
+        if (hitlMag)
+            delete hitlMag;
+        if (hitlBaro)
+            delete hitlBaro;
+        if (hitlGps)
+            delete hitlGps;
         if (dataSinks)
             delete[] dataSinks;
         if (eventSinks)
@@ -71,20 +90,21 @@ namespace astra_rocket
         // Configure base Astra system
         config.withLoggingRate(config.getPreflightLogRate());
         config.withDataLogs(dataSinks, numDataSinks);
+        config.withEventLogs(eventSinks, numEventSinks);
 
-        auto sm = config.getSensorManager();
-        if (sm)
+        if (config.getHITLEnabled())
         {
-            sm->setAccelSource(new HITLAccel());
-            sm->setGyroSource(new HITLGyro());
-            sm->setBaroSource(new HITLBarometer());
-            sm->setGPSSource(new HITLGPS());
-            sm->setMagSource(new HITLMag());
-        }
-        else
-        {
-            LOGE("Sensor Manager is not working properly. HITL/SITL cannot continue.");
-            return false;
+            hitlAccel = new HITLAccel();
+            hitlGyro = new HITLGyro();
+            hitlMag = new HITLMag();
+            hitlBaro = new HITLBarometer();
+            hitlGps = new HITLGPS();
+
+            config.withAccel(hitlAccel)
+                .withGyro(hitlGyro)
+                .withMag(hitlMag)
+                .withBaro(hitlBaro)
+                .withGPS(hitlGps);
         }
 
         // Create Astra system
@@ -98,6 +118,19 @@ namespace astra_rocket
             // In HITL mode, skip initial ground level setup
             // It will be established on first valid HITL packet
             LOGI("HITL mode: Ground level will be set from first simulation packet");
+
+            // Register HITL handler with Astra's SerialMessageRouter
+            s_activeInstance = this;
+            SerialMessageRouter *router = astraSys->getMessageRouter();
+            if (router)
+            {
+                router->withListener("HITL/", AstraRocket::handleHITLMessage);
+            }
+            else
+            {
+                LOGE("Astra message router not available - HITL cannot continue.");
+                return false;
+            }
         }
         else
         {
@@ -135,50 +168,11 @@ namespace astra_rocket
         // Check if HITL mode is enabled
         if (config.getHITLEnabled())
         {
-
-            // HITL mode: wait for incoming sensor data from simulation
-            if (Serial.available())
-            {
-                String line = Serial.readStringUntil('\n');
-
-                if (line.startsWith("HITL/"))
-                {
-                    // Parse incoming HITL packet
-
-                    double simTime;
-                    if (HITLParser::parseAndInject(line.c_str(), simTime))
-                    {
-
-                        // Update with simulation time (in seconds)
-                        // simTime is already in seconds from the HITL packet
-                        bool updateResult = astraSys->update(simTime);
-
-                        // Set ground level from first valid packet (after update)
-                        if (!hitlGroundLevelSet)
-                        {
-                            auto barometer = config.getSensorManager()->getBaroSource();
-
-                            // Debug: Check what pressure value we're reading
-                            HITLSensorBuffer &buffer = HITLSensorBuffer::instance();
-
-                            groundLevelAltitude = barometer->getASLAltM();
-                            rocketState->setGroundLevel(groundLevelAltitude);
-                            hitlGroundLevelSet = true;
-                        }
-                    }
-                    else
-                    {
-                        LOGE("AstraRocket::update() - HITL parse FAILED");
-                    }
-                }
-                else
-                {
-                }
-            }
-            else
-            {
-                // No data available - this is normal and expected most of the time
-            }
+            // HITL mode: router handles all incoming HITL/ messages
+            SerialMessageRouter *router = astraSys->getMessageRouter();
+            if (router)
+                router->update();
+            return;
         }
         else
         {
@@ -225,6 +219,36 @@ namespace astra_rocket
             else
             {
                 LOGW("Data sink %d FAILED", i);
+            }
+        }
+    }
+
+    void AstraRocket::handleHITLMessage(const char *message, const char *prefix, Stream *source)
+    {
+        (void)prefix;
+        (void)source;
+
+        if (!s_activeInstance || !message)
+            return;
+
+        double simTime = 0.0;
+        if (!HITLParser::parse(message, simTime))
+        {
+            LOGE("AstraRocket::handleHITLMessage() - HITL parse FAILED");
+            return;
+        }
+
+        s_activeInstance->astraSys->update(simTime);
+
+        if (!s_activeInstance->hitlGroundLevelSet)
+        {
+            SensorManager *sm = s_activeInstance->config.getSensorManager();
+            if (sm && sm->getBaroSource() && sm->getBaroSource()->isInitialized())
+            {
+                s_activeInstance->groundLevelAltitude = sm->getBaroSource()->getASLAltM();
+                s_activeInstance->rocketState->setGroundLevel(s_activeInstance->groundLevelAltitude);
+                s_activeInstance->hitlGroundLevelSet = true;
+                LOGI("HITL ground level established: %0.2f m MSL", s_activeInstance->groundLevelAltitude);
             }
         }
     }

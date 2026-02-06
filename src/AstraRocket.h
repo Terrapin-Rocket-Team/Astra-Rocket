@@ -101,6 +101,13 @@ namespace astra_rocket
         DefaultKalmanFilter *kalmanFilter;
         MahonyAHRS *orientationFilter;
 
+        // HITL sensors (owned when HITL enabled)
+        HITLAccel *hitlAccel;
+        HITLGyro *hitlGyro;
+        HITLMag *hitlMag;
+        HITLBarometer *hitlBaro;
+        HITLGPS *hitlGps;
+
         // Logging
         ILogSink **dataSinks;
         ILogSink **eventSinks;
@@ -116,6 +123,8 @@ namespace astra_rocket
 
         // Helper methods
         void setupLogging();
+        static void handleHITLMessage(const char *message, const char *prefix, Stream *source);
+        static AstraRocket *s_activeInstance;
 
         // Constants
         static constexpr int ASTRA_ROCKET_MAX_SENSORS = 10;
