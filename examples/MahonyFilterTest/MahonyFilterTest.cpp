@@ -38,7 +38,7 @@ using namespace astra;
 
 // ============ FILTER CONFIGURATION ============
 const double MAHONY_KP = 0.5;      // Proportional gain (higher = faster correction)
-const double MAHONY_KI = 0.001;    // Integral gain (gyro bias correction)
+const double MAHONY_KI = 0.000;    // Integral gain (gyro bias correction)
 const double UPDATE_RATE = 50.0;   // Hz (50 Hz = 20ms update period)
 const double DT = 1.0 / UPDATE_RATE;
 
@@ -70,6 +70,7 @@ bool magCalibrationComplete = false;
 int calibrationCount = 0;
 
 void setup() {
+    bmi088.setMountingOrientation(MountingOrientation::FLIP_XZ);  // Adjust based on your mounting
     magnetometer.setMountingOrientation(MountingOrientation::FLIP_XY);  // Adjust based on your mounting
     Serial.begin(115200);
     while (!Serial && millis() < 5000) {
@@ -308,7 +309,7 @@ void loop() {
     }
 
     // Get orientation
-    Quaternion q = mahony.getQuaternion();
+    Quaternion q = mahony.getQuaternion().conjugate();  // Conjugate to match expected output frame
 
     // Check for NaN in quaternion
     if (isnan(q.w()) || isnan(q.x()) || isnan(q.y()) || isnan(q.z())) {
