@@ -1,51 +1,52 @@
----
+﻿---
 title: Home
 hide: footer
 ---
-This page written by ChatGPT. May not be accurate or helpful.
 
-# Welcome to the Terrapin Rocket Team's Multi-Mission Flight Software (Astra) Documentation
+# Astra-Rocket Documentation
 
-Welcome to the (maybe) official documentation site for TRT's **Multi-Mission Flight Software (Astra)**—the versatile and robust flight code framework developed by the Terrapin Rocket Team (TRT). Whether you're looking to integrate Astra into your next mission, contribute to its ongoing development, or explore its unique capabilities, you've come to the right place!
-
----
-
-## 🚀 What is Astra?
-Astra is a modular and scalable flight software framework designed to meet the diverse needs of rocketry missions. Built with adaptability and reliability in mind, it provides a solid foundation for developing and deploying mission-critical systems. 
+Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework built on top of TRT-Astra. It provides a batteries-included workflow for rockets: sensor initialization, state estimation, flight-stage logic, and logging are wired for you so you can focus on mission-specific behavior.
 
 ---
 
-## 📚 Explore the Docs
+## What Astra-Rocket Gives You
 
-This documentation is organized into three main sections to help you navigate the Astra ecosystem:
-
-### 1. **Getting Started**
-   - Learn how to install Astra and set it up as your base flight code framework.
-   - Step-by-step guides for configuring Astra to meet your mission's requirements.
-   - Code snippets and examples to help you hit the ground running.
-
-### 2. **Maintaining Astra**
-   - Dive into the internals of Astra to understand its architecture and core principles.
-   - Learn best practices for maintaining and updating the library.
-   - Contribution guidelines for those looking to improve Astra.
-
-### 3. **Miscellaneous Resources**
-   - Additional tools and utilities to enhance your development experience.
-   - Tips, tricks, and advanced usage scenarios.
-   - Frequently asked questions and troubleshooting.
+- **Simple flight computer setup**: minimal `setup()` and `loop()` with one `AstraRocket` object
+- **Sensor auto-detection**: use supported IMU, barometer, GPS, magnetometer, and high-G accelerometers without extra glue
+- **Flight-stage tracking**: PAD -> BOOST -> COAST -> APOGEE -> DESCENT -> LANDING
+- **Logging out of the box**: preflight, flight, and postflight logging rates
+- **HITL ready**: easy Hardware-In-The-Loop mode for simulation and testing
 
 ---
 
-## ✨ Features at a Glance
-- **Modularity:** Pick and choose components to fit your mission's needs.
-- **Scalability:** From single-stage to multi-stage rockets, Astra grows with your ambitions.
-- **Open Source:** Join a community of rocketry enthusiasts and contribute to the future of Astra.
+## Quick Start
+
+1. Read [Installation](user-guide/installation.md)
+2. Follow [Basic Usage](user-guide/basic-use.md)
+3. Explore the Interfaces and Utilities for advanced customization
 
 ---
 
-## 🌟 Ready to Start?
-Head over to the [Getting Started](#) section to begin your journey with Astra. If you're a seasoned developer or contributor, check out the [Maintaining Astra](#) section to dive deeper into the framework.
+## Core Architecture
 
-Together, let's push the boundaries of rocketry innovation!
+**AstraRocket**
+- `AstraRocket` wraps Astra's `Astra` system and provides rocket-specific defaults
+- `AstraRocketConfig` extends `AstraConfig` with flight-specific settings
+- `RocketState` runs Kalman + Mahony filters for position/velocity/orientation
+
+**Sensors**
+- Uses Astra's sensor interfaces (`Accel`, `Gyro`, `Mag`, `Barometer`, `GPS`, `IMU`)
+- Custom hardware is supported via thin wrapper classes
+
+**Logging**
+- Event logs and telemetry logs are configured automatically
+- Logging rates change based on detected flight stage
 
 ---
+
+## Where To Go Next
+
+- [Installation](user-guide/installation.md)
+- [Basic Usage](user-guide/basic-use.md)
+- [Utilities](user-guide/utils)
+- [Interfaces](user-guide/ifaces)

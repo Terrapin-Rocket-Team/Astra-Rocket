@@ -28,7 +28,10 @@ namespace astra_mocks
 
         Quaternion getQuaternion() const override {
             if (mockValid) {
-                return mockQ;
+                // Treat mockQ as board->earth so existing tests can set intuitive orientations.
+                // Mahony internally tracks body->earth, so convert using current board->body mount.
+                Quaternion boardToBody = getBoardToBodyQuaternion();
+                return mockQ * boardToBody.conjugate();
             }
             return MahonyAHRS::getQuaternion();
         }

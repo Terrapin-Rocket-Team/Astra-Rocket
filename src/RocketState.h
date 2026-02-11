@@ -101,7 +101,7 @@ private:
 
     // Orientation tracking
     double offVerticalAngle;     // Angle from vertical axis
-    Quaternion mountQuat_rb;     // Rocket->Body mapping
+    Quaternion mountQuat_rb;     // Rocket->Board mounting rotation (R->B)
     UpAxis currentUpAxis;
     UpAxis pendingUpAxis;
     int axisStableCount;

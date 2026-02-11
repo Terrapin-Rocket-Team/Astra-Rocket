@@ -1,70 +1,37 @@
----
+﻿---
 title: User Manual - Introduction
 ---
-# The Complete Astra User's Manual
+# Astra-Rocket User Manual
 
 !!! info
-    These docs were written in the order shown on the sidebar. You many notice that later docs somewhat rely on the reader understanding topics covered earlier. They should mostly be self-sufficient, but it's not guaranteed.
+    This documentation focuses on Astra-Rocket, which is built on top of TRT-Astra. Many of the Interfaces and Utilities described here come directly from Astra.
 
-    As always, if you have any questions, feel free to reach out on Slack or Github.
 ---
 
-<sub><sup><sub><sup>Now on a cool new website!</sup></sub></sup></sub>
+Astra-Rocket is a high-level flight computer framework tailored for rocketry. It provides a streamlined workflow while still giving you full access to Astra's underlying interfaces.
 
-This is the official user's manual for TRT's Multi-Mission Flight Software (Astra). It is designed to be a comprehensive guide for users of all levels, from beginners to advanced developers. The manual covers everything from installation and setup to advanced features and troubleshooting.
-
-The library is essentially split into two categories: **Utilities** and **Interfaces**. 
+The library is organized into two major categories:
 
 ---
 
 ## Utilities
 
-We describe utilities as any part of the library designed to be used as-is, without the end user (you) having to overload or otherwise modify it.
-The utilities offered by Astra are:
+Utilities are ready-to-use systems you typically do not need to modify.
 
-### **[BlinkBuzz](blinkbuzz.md)**
-An (asynchronous!) utility for outputting patterned buzzes and LED blinks.
-
-### **[CircBuffer](circbuf.md)**
-A queue or FIFO system for storing data in a fixed-size buffer.
-
-### **[Logger](logger.md)**
-A simple logging utility that can log to the SD card or USB serial port.
-
-### **[RetrieveData](retrieve-data.md)**
-A system that allows transfer of flight data files over Serial, allowing retrieval of files stored in onboard flash.
-
-### **[Math](math.md)**
-A collection of ... math? ... objects (vectors, matrices, and quaternions) and their functions.
-
-### **[AstraSystem](mmfssys.md)**
-An object designed to handle all of the Astra functions during flight.
-
-Most of the power that Astra offers comes from the Logger and AstraSystem utilities. That is to say, those are two of the most complicated systems in the library.
+- **BlinkBuzz**: Non-blocking buzzer and LED patterns
+- **Logger**: Event logs and CSV telemetry
+- **Math**: Vectors, matrices, and quaternions
+- **AstraSystem**: Core system that coordinates sensors and state estimation
 
 ---
 
 ## Interfaces
 
-Interfaces are for any other part of the library that is not fully implemented, or otherwise is expected to be modified by the end user. Most of them are not strictly interfaces, but rather abstract classes. The following interfaces are offered by Astra:
+Interfaces are base classes you extend for custom behavior or hardware.
 
-### **[State](state.md)**
-This is the main purpose of using Astra. It is an abstract class that is used to define the state of the rocket. It is designed to be overloaded by the end user, and is used to define the behavior of the telemetry systems during flight.
+- **State**: The rocket state estimator and flight logic interface
+- **DataReporter**: Sources of telemetry data
+- **Sensor** and sensor types (Barometer, IMU, GPS, etc.)
+- **Filters**: Kalman and AHRS filters
 
-### **[DataReporter](data-reporter.md)**
-This is an interface for recording flight CSV data using Logger. State implements it, as do all of the sensors. You may extend it to add your own data reporters.
-
-### **[Sensor](sensor.md)**
-This is the base sensor interface. There are further interfaces for each type of sensor:
-
-- **[Barometer](baro.md)**
-- **[IMU](imu.md)** (9DOF, including accelerometer, gyroscope, and magnetometer)
-- **[GPS](gps.md)**
-- **[Encoder](enc.md)** (a motor encoder)
-- **[LightSensor](light.md)**
-
-### **[Event](event.md)**
-This is a simple, readily-extendable event system. You can create classes that listen to and fire off custom events, or overload the handler for the default events.
-
-### **[Filters](filters.md)**
-This is a basic Kalman filter interface, able to be passed into State for it to use to filter sensor data.
+For most users, the [Basic Usage](basic-use.md) guide is the fastest way to get started.

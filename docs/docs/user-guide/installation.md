@@ -1,73 +1,94 @@
----
+﻿---
 title: Installation
 ---
 
-You may skip over this installation step if you are working in a repo that already uses Astra and you are just looking to get introduced.
+# Installation
 
-!!! warning "Important!"
-    In order for PIO to recognize that you are working on a PIO project, you *must* open VSCode in the root directory of that project. that is, the directory that has the `platformio.ini` file in it. Without this, PlatformIO **will not initialize** and you will be unable to build or use proper Intellisense.
+This guide assumes PlatformIO with the Arduino framework.
+
+!!! warning "Important"
+    PlatformIO only initializes when VS Code is opened at the **project root** (the folder containing `platformio.ini`). Open that folder directly to avoid missing build tasks and Intellisense.
+
 ---
 
 ## Prerequisites
 
-Before you begin, make sure you have the following:
-
-- Basic knowledge of C++ programming. (knowledge of what a pointer is and how to use one)
-- VSCode and the PlatformIO (PIO) extension installed. [[Installation Guide](https://docs.platformio.org/en/latest/core/installation/index.html)]
-- Basic knowledge of VSCode and the PlatformIO interface [[Interface cheat-sheet](#)]
-- Basic knowledge of Git and GitHub. [[TRT Git/Github Guide](#)]
-- Access to a Teensy 4.1. 
+- VS Code + PlatformIO extension
+- A supported board (Teensy 4.1, STM32, ESP32)
+- Basic C++ familiarity
 
 ---
 
-## Installation
+## 1. Create a PlatformIO Project
 
+Use the PlatformIO Home screen to create a new project. Choose your board and the Arduino framework.
 
-### Create a new PlatformIO project
+---
 
-Pick any folder to create it in, and create a new project. We strongly recommend choosing the arduino framework and the Teensy 4.1 board, as Astra has not been tested on *any* other system.
+## 2. Add Astra-Rocket to `lib_deps`
 
-### Modify the `platformio.ini` file
+Add Astra-Rocket to your `platformio.ini`. Astra-Rocket will pull in Astra automatically.
 
-Add a dependency to Astra by adding the highlighted lines to your `platformio.ini` file, found in your project's root directory.
-```ini linenums="10" hl_lines="5-6" title=""
+```ini title="platformio.ini"
 [env:teensy41]
 platform = teensy
 board = teensy41
 framework = arduino
 lib_deps =
-    https://github.com/Terrapin-Rocket-Team/Multi-Mission-Flight-Software.git#v3.0.0
+  https://github.com/Terrapin-Rocket-Team/Astra-Rocket.git
+build_flags =
+  -D ENV_TEENSY
 ```
 
-!!! info 
-    You may add multiple dependencies by appending new indented lines under `lib_deps`.
-!!! tip 
-    We recommend always attaching the version specifier to the end of the url, as Astra undergoes frequent breaking changes. For github links, this looks like `#{tag}`. We give our releases (a.k.a. tags) semantic versioning[^sv] numbers like `v3.0.0`
+```ini title="platformio.ini"
+[env:stm32h723vehx]
+platform = ststm32
+board = stm32h723vehx
+framework = arduino
+lib_deps =
+  https://github.com/Terrapin-Rocket-Team/Astra-Rocket.git
+  stm32duino/STM32duino STM32SD
+  https://github.com/stm32duino/FatFs.git
+build_flags =
+  -D ENV_STM
+```
 
-Now save the file. You should notice PIO start to download Astra and all of its dependencies. It may take a few minutes.
+```ini title="platformio.ini"
+[env:esp32]
+platform = espressif32
+board = esp32-s3-devkitm-1
+framework = arduino
+lib_deps =
+  https://github.com/Terrapin-Rocket-Team/Astra-Rocket.git
+build_flags =
+  -D ENV_ESP
+```
 
-### Add `Astra.h` to `main.cpp`
+!!! tip
+    Pin a specific release by appending a tag, e.g. `https://github.com/Terrapin-Rocket-Team/Astra-Rocket.git#v0.2.0`.
 
-Looking at the folder structure, PIO should have created a `src` folder with a `main.cpp` in it. It has some basic example functions that you may ignore or delete. To link Astra to this main file though, we need to `#include` it:
+---
 
-```cpp hl_lines="2" title=""
+## 3. Verify the Build
+
+Create a basic `main.cpp` and build the project.
+
+```cpp title="src/main.cpp"
 #include <Arduino.h>
-#include <Astra.h>
+#include <AstraRocket.h>
 
-// put function declarations here:
-int myFunction(int, int);
+using namespace astra_rocket;
+
+AstraRocket rocket;
+
+void setup() {
+    Serial.begin(115200);
+    rocket.init();
+}
+
+void loop() {
+    rocket.update();
+}
 ```
 
-### Build the project
-
-The last thing to do to make sure that everything went well is to simply build the project.
-
-You can use any of PIO's `build` buttons to achieve this. If you don't know where the buttons are, we recommend using the toolbar on the bottom of the screen, where the `build` command is represented by the checkmark.
-
-The terminal should spit out `========[SUCCESS] Took ##.## seconds=======`. If not, first try and see if you can understand the error. If you get stuck, please feel free to message any of the club members with experience working in PlatformIO or Astra.
-
-## Conclusion
-
-That's all there is to installing the library. You're now ready to move on to using it! Hopefully that part will be just as straightforward.
-
-[^sv]: We always use this format, but we don't always follow correct [semantic versioning procedures](https://semver.org/).
+If the build succeeds, Astra-Rocket is installed correctly.

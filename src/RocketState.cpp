@@ -72,15 +72,35 @@ namespace astra_rocket
         if (forceGyroOnly)
         {
             orientationFilter->update(gyro, dt);
-            orientation = orientationFilter->getQuaternion();
-            Vector<3> earthAccel = orientationFilter->getEarthAcceleration(accel);
-            acceleration.x() = earthAccel.x();
-            acceleration.y() = earthAccel.y();
-            acceleration.z() = earthAccel.z();
-            return;
+        }
+        else
+        {
+            // High-G switching logic (preserve base State behavior)
+            double accelMag = accel.magnitude();
+            double accelError = fabs(accelMag - 9.81);
+
+            if (accelError < 1.0)
+            {
+                // Low acceleration - trust accelerometer for tilt correction
+                orientationFilter->update(accel, gyro, dt);
+            }
+            else
+            {
+                // High-G or freefall - gyro-only mode
+                orientationFilter->update(gyro, dt);
+            }
         }
 
-        State::updateOrientation(gyro, accel, dt);
+        // Keep State::orientation in board->earth for compatibility with existing logic.
+        Quaternion boardToRocket = mountQuat_rb.conjugate();
+        Quaternion qRocketToEarth = orientationFilter->getQuaternion();
+        orientation = qRocketToEarth * boardToRocket;
+
+        // Earth-frame acceleration from board-frame accel (Mahony applies board->body internally).
+        Vector<3> earthAccel = orientationFilter->getEarthAcceleration(accel);
+        acceleration.x() = earthAccel.x();
+        acceleration.y() = earthAccel.y();
+        acceleration.z() = earthAccel.z();
     }
 
     void RocketState::updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, const Vector<3> &mag, double dt)
@@ -91,15 +111,35 @@ namespace astra_rocket
         if (forceGyroOnly)
         {
             orientationFilter->update(gyro, dt);
-            orientation = orientationFilter->getQuaternion();
-            Vector<3> earthAccel = orientationFilter->getEarthAcceleration(accel);
-            acceleration.x() = earthAccel.x();
-            acceleration.y() = earthAccel.y();
-            acceleration.z() = earthAccel.z();
-            return;
+        }
+        else
+        {
+            // High-G switching logic (preserve base State behavior)
+            double accelMag = accel.magnitude();
+            double accelError = fabs(accelMag - 9.81);
+
+            if (accelError < 1.0)
+            {
+                // Low acceleration - trust accelerometer (and magnetometer) for correction
+                orientationFilter->update(accel, gyro, mag, dt);
+            }
+            else
+            {
+                // High-G or freefall - gyro-only mode
+                orientationFilter->update(gyro, dt);
+            }
         }
 
-        State::updateOrientation(gyro, accel, mag, dt);
+        // Keep State::orientation in board->earth for compatibility with existing logic.
+        Quaternion boardToRocket = mountQuat_rb.conjugate();
+        Quaternion qRocketToEarth = orientationFilter->getQuaternion();
+        orientation = qRocketToEarth * boardToRocket;
+
+        // Earth-frame acceleration from board-frame accel (Mahony applies board->body internally).
+        Vector<3> earthAccel = orientationFilter->getEarthAcceleration(accel);
+        acceleration.x() = earthAccel.x();
+        acceleration.y() = earthAccel.y();
+        acceleration.z() = earthAccel.z();
     }
 
     int RocketState::update(double currentTimeSec)
@@ -132,7 +172,9 @@ namespace astra_rocket
 
         if (orientationFilter && orientationFilter->isReady())
         {
-            orientation = orientationFilter->getQuaternion();
+            Quaternion boardToRocket = mountQuat_rb.conjugate();
+            Quaternion qRocketToEarth = orientationFilter->getQuaternion();
+            orientation = qRocketToEarth * boardToRocket;
         }
 
         if (filter)
@@ -318,6 +360,15 @@ namespace astra_rocket
         q.fromMatrix(m);
         q.normalize();
         mountQuat_rb = q;
+
+        if (orientationFilter)
+        {
+            // Mahony expects board->body; mountQuat_rb is rocket->board.
+            orientationFilter->setBoardToBodyQuaternion(mountQuat_rb.conjugate(), true);
+            Quaternion boardToRocket = mountQuat_rb.conjugate();
+            Quaternion qRocketToEarth = orientationFilter->getQuaternion();
+            orientation = qRocketToEarth * boardToRocket;
+        }
     }
 
     Quaternion RocketState::getRocketOrientation() const
