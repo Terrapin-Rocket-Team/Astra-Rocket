@@ -87,25 +87,8 @@ namespace astra_rocket
         LOGI("RocketState created with Kalman filter and orientation filter");
         config.withState(rocketState);
 
-        // Configure base Astra system
-        config.withLoggingRate(config.getPreflightLogRate());
-        config.withDataLogs(dataSinks, numDataSinks);
-        config.withEventLogs(eventSinks, numEventSinks);
-
-        if (config.getHITLEnabled())
-        {
-            hitlAccel = new HITLAccel();
-            hitlGyro = new HITLGyro();
-            hitlMag = new HITLMag();
-            hitlBaro = new HITLBarometer();
-            hitlGps = new HITLGPS();
-
-            config.withAccel(hitlAccel)
-                .withGyro(hitlGyro)
-                .withMag(hitlMag)
-                .withBaro(hitlBaro)
-                .withGPS(hitlGps);
-        }
+        // Configure mode-dependent runtime behavior (HITL vs hardware)
+        configureRuntimeMode();
 
         // Create Astra system
         astraSys = new Astra(&config);
@@ -155,6 +138,28 @@ namespace astra_rocket
         LOGI("Flight computer ready. Flight stage: %s", flightStageToString(PAD_IDLE));
 
         return ready = true;
+    }
+
+    void AstraRocket::configureRuntimeMode()
+    {
+        config.withDataLogs(dataSinks, numDataSinks);
+        config.withEventLogs(eventSinks, numEventSinks);
+
+        if (config.getHITLEnabled())
+        {
+            configureHITLMode();
+        }
+        else
+        {
+            // Hardware mode uses preflight log rate until liftoff logic changes it.
+            config.withLoggingRate(config.getPreflightLogRate());
+        }
+    }
+
+    void AstraRocket::configureHITLMode()
+    {
+        // HITL policy is handled in Astra core via AstraConfig::withHITL().
+        config.withHITL(true);
     }
 
     void AstraRocket::update()

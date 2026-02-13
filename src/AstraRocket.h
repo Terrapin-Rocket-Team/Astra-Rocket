@@ -123,6 +123,8 @@ namespace astra_rocket
 
         // Helper methods
         void setupLogging();
+        void configureRuntimeMode();
+        void configureHITLMode();
         static void handleHITLMessage(const char *message, const char *prefix, Stream *source);
         static AstraRocket *s_activeInstance;
 
