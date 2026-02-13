@@ -29,8 +29,13 @@
             "version": "https://github.com/Terrapin-Rocket-Team/Astra.git#astra-support-integration"
         }
     ],
-    "frameworks": "arduino",
-    "platforms": "*",
+    "frameworks": "*",
+    "platforms": [
+        "teensy",
+        "native",
+        "ststm32",
+        "espressif32"
+    ],
     "build":
     {
         "libLDFMode": "deep+",
