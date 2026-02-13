@@ -37,8 +37,8 @@ using namespace astra;
 #define LIS3MDL_SA1_STATE LIS3MDL::sa1_auto  // Auto-detect address (0x1C or 0x1E)
 
 // ============ FILTER CONFIGURATION ============
-const double MAHONY_KP = 0.5;      // Proportional gain (higher = faster correction)
-const double MAHONY_KI = 0.000;    // Integral gain (gyro bias correction)
+const double MAHONY_KP = 0.8;      // Proportional gain (higher = faster correction)
+const double MAHONY_KI = 0.002;    // Integral gain (gyro bias correction)
 const double UPDATE_RATE = 50.0;   // Hz (50 Hz = 20ms update period)
 const double DT = 1.0 / UPDATE_RATE;
 
@@ -48,12 +48,12 @@ const double DT = 1.0 / UPDATE_RATE;
 // Enable this to use gyro-only updates when accel magnitude deviates from 1 g.
 const bool FLIGHT_LIKE_MODE = true;
 const double ACCEL_TRUST_G = 9.81;     // m/s^2
-const double ACCEL_TRUST_TOL = 1.5;    // m/s^2 tolerance around 1 g
+const double ACCEL_TRUST_TOL = 1.1;    // m/s^2 tolerance around 1 g
 
 // ============ CALIBRATION SETTINGS ============
 const int CALIBRATION_SAMPLES = 100;  // Number of samples for initial calibration
 const unsigned long CALIBRATION_TIME = 2000;  // Calibration time in milliseconds (stationary)
-const unsigned long MAG_CALIBRATION_TIME = 10000;  // Magnetometer calibration time (moving)
+const unsigned long MAG_CALIBRATION_TIME = 30000;  // Magnetometer calibration time (moving)
 
 // ============ GLOBAL OBJECTS ============
 SensorManager sensorManager;
