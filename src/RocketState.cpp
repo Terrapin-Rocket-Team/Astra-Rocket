@@ -1,4 +1,5 @@
 #include "RocketState.h"
+#include "AstraRocketConfig.h"
 #include <RecordData/Logging/EventLogger.h>
 #include <Math/Vector.h>
 #include <Sensors/Accel/Accel.h>
@@ -13,7 +14,7 @@ using namespace astra;
 namespace astra_rocket
 {
 
-    RocketState::RocketState(LinearKalmanFilter *filter, MahonyAHRS *orientationFilter)
+    RocketState::RocketState(LinearKalmanFilter *filter, MahonyAHRS *orientationFilter, const AstraRocketConfig *config)
         : State(filter, orientationFilter),
           currentStage(PAD_IDLE),
           previousStage(PAD_IDLE),
@@ -36,7 +37,8 @@ namespace astra_rocket
           lowAccelDetected(false),
           lowVelocityDetected(false),
           drogueRateDetected(false),
-          mainRateDetected(false)
+          mainRateDetected(false),
+          flightConfig(config)
     {
         // Add rocket-specific columns to DataReporter
         insertColumn(0, "%d", &currentStage, "Flight Stage");
@@ -376,10 +378,55 @@ namespace astra_rocket
         return orientation * mountQuat_rb;
     }
 
+    double RocketState::liftoffAccelThresholdMs2() const
+    {
+        const double g = (flightConfig ? flightConfig->getLiftoffAccelThreshold() : DEFAULT_LIFTOFF_ACCEL_THRESHOLD_G);
+        return g * 9.81;
+    }
+
+    unsigned long RocketState::liftoffDurationMs() const
+    {
+        return flightConfig ? flightConfig->getLiftoffDetectDuration() : DEFAULT_LIFTOFF_DURATION_MS;
+    }
+
+    double RocketState::burnoutAccelThresholdMs2() const
+    {
+        const double g = (flightConfig ? flightConfig->getBurnoutAccelThreshold() : DEFAULT_BURNOUT_ACCEL_THRESHOLD_G);
+        return g * 9.81;
+    }
+
+    unsigned long RocketState::burnoutDurationMs() const
+    {
+        // Burnout duration is not yet exposed in AstraRocketConfig.
+        return DEFAULT_BURNOUT_DURATION_MS;
+    }
+
+    double RocketState::apogeeVelocityThresholdMs() const
+    {
+        return flightConfig ? flightConfig->getApogeeVelocityThreshold() : DEFAULT_APOGEE_VELOCITY_THRESHOLD;
+    }
+
+    double RocketState::landingVelocityThresholdMs() const
+    {
+        return flightConfig ? flightConfig->getLandingVelocityThreshold() : DEFAULT_LANDING_VELOCITY_THRESHOLD;
+    }
+
+    unsigned long RocketState::landingDurationMs() const
+    {
+        return flightConfig ? flightConfig->getLandingDetectDuration() : DEFAULT_LANDING_DURATION_MS;
+    }
+
     void RocketState::detectFlightStage()
     {
         unsigned long now = (unsigned long)(currentTime * 1000.0);
         FlightStage newStage = currentStage;
+        const double liftoffAccelThresh = liftoffAccelThresholdMs2();
+        const unsigned long liftoffDuration = liftoffDurationMs();
+        const double burnoutAccelThresh = burnoutAccelThresholdMs2();
+        const unsigned long burnoutDuration = burnoutDurationMs();
+        const double apogeeVelThresh = apogeeVelocityThresholdMs();
+        const double landingVelThresh = landingVelocityThresholdMs();
+        const unsigned long landingDuration = landingDurationMs();
 
         switch (currentStage)
         {
@@ -390,7 +437,7 @@ namespace astra_rocket
             // Optional debug spam reduction
             // fprintf(stderr, "DEBUG RocketState: PAD_IDLE - accelMag=%0.3f\n", accelMag);
 
-            if (accelMag > LIFTOFF_ACCEL_THRESHOLD)
+            if (accelMag > liftoffAccelThresh)
             {
                 if (!highAccelDetected)
                 {
@@ -398,7 +445,7 @@ namespace astra_rocket
                     highAccelDetected = true;
                     fprintf(stderr, "DEBUG RocketState: High accel detected! Starting timer...\n");
                 }
-                else if (now - highAccelStartTime > LIFTOFF_DURATION)
+                else if (now - highAccelStartTime > liftoffDuration)
                 {
                     newStage = BOOST;
                     LOGI("LIFTOFF DETECTED! Vertical accel: %0.2f G", acceleration.z());
@@ -423,20 +470,20 @@ namespace astra_rocket
             // Detect motor burnout: earth-frame acceleration magnitude drops to or below threshold
             // Use earth-frame acceleration (from State), not raw accelerometer reading
             {
-                double earthAccelMag = acceleration.magnitude();
+                const double verticalAccel = acceleration.z();
 
-                if (earthAccelMag <= BURNOUT_ACCEL_THRESHOLD)
+                if (verticalAccel <= burnoutAccelThresh)
                 {
                     if (!lowAccelDetected)
                     {
                         lowAccelStartTime = now;
                         lowAccelDetected = true;
                     }
-                    else if (now - lowAccelStartTime > BURNOUT_DURATION)
+                    else if (now - lowAccelStartTime > burnoutDuration)
                     {
                         newStage = COAST;
-                        LOGI("MOTOR BURNOUT DETECTED at %0.2f m AGL, earth accel: %0.2f m/s²",
-                             position.z(), earthAccelMag);
+                        LOGI("MOTOR BURNOUT DETECTED at %0.2f m AGL, vertical accel: %0.2f m/s^2",
+                             position.z(), verticalAccel);
                     }
                 }
                 else
@@ -447,11 +494,20 @@ namespace astra_rocket
             break;
 
         case COAST:
-            // Detect apogee: vertical velocity approaches zero
-            if (fabs(velocity.z()) < APOGEE_VELOCITY_THRESHOLD || timeInCurrentStage > 25)
+            // Detect apogee once descent is clearly underway.
+            // This avoids false zero-crossings from estimator noise while still climbing.
+            if (velocity.z() <= -apogeeVelThresh)
             {
                 newStage = APOGEE;
                 LOGI("APOGEE DETECTED at %0.2f m AGL", position.z());
+            }
+            else if (timeInCurrentStage > 120 && velocity.z() < apogeeVelThresh)
+            {
+                // Safety fallback: if state estimator is degraded, avoid getting
+                // stuck in COAST forever, but do not trigger while strongly climbing.
+                newStage = APOGEE;
+                LOGW("APOGEE FALLBACK after long coast at %0.2f m AGL, vz=%0.2f m/s",
+                     position.z(), velocity.z());
             }
             break;
 
@@ -520,14 +576,14 @@ namespace astra_rocket
 
         case UNDER_MAIN:
             // Detect landing: low velocity sustained
-            if (fabs(velocity.z()) < LANDING_VELOCITY_THRESHOLD)
+            if (fabs(velocity.z()) < landingVelThresh)
             {
                 if (!lowVelocityDetected)
                 {
                     lowVelocityStartTime = now;
                     lowVelocityDetected = true;
                 }
-                else if (now - lowVelocityStartTime > LANDING_DURATION)
+                else if (now - lowVelocityStartTime > landingDuration)
                 {
                     newStage = LANDED;
                     LOGI("LANDING DETECTED at %0.2f m AGL", position.z());

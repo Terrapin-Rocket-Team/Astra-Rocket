@@ -62,7 +62,7 @@ namespace astra_rocket
 
         // Create rocket state with Kalman filter and orientation filter
         // Sensors are managed by Astra's SensorManager, not passed to RocketState
-        rocketState = new RocketState(kalmanFilter, orientationFilter);
+        rocketState = new RocketState(kalmanFilter, orientationFilter, &config);
         LOGI("RocketState created with Kalman filter and orientation filter");
         config.withState(rocketState);
 

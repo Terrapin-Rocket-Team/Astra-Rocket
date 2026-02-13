@@ -10,6 +10,7 @@
 using namespace astra;
 
 namespace astra_rocket {
+class AstraRocketConfig;
 
 /**
  * RocketState: Rocket-specific state estimator
@@ -27,7 +28,7 @@ public:
      * @param filter Optional Kalman filter for state estimation
      * @param orientationFilter Optional Mahony AHRS filter for orientation estimation
      */
-    RocketState(LinearKalmanFilter *filter, MahonyAHRS *orientationFilter);
+    RocketState(LinearKalmanFilter *filter, MahonyAHRS *orientationFilter, const AstraRocketConfig *config = nullptr);
 
     /**
      * Get current flight stage
@@ -120,15 +121,14 @@ private:
     // Alignment tuning
     static constexpr double AXIS_SWITCH_DOT_THRESHOLD = 0.90;
     static constexpr int AXIS_SWITCH_STABLE_COUNT = 10;
-
-    // Stage detection thresholds (can be made configurable)
-    static constexpr double LIFTOFF_ACCEL_THRESHOLD = 3.0 * 9.81;      // m/s² (3.0G)
-    static constexpr unsigned long LIFTOFF_DURATION = 100;      // ms
-    static constexpr double BURNOUT_ACCEL_THRESHOLD = 1.5 * 9.81;      // m/s² (1.5G)
-    static constexpr unsigned long BURNOUT_DURATION = 200;      // ms
-    static constexpr double APOGEE_VELOCITY_THRESHOLD = 2.0;    // m/s
-    static constexpr double LANDING_VELOCITY_THRESHOLD = 1.0;   // m/s
-    static constexpr unsigned long LANDING_DURATION = 3000;     // ms
+    // Stage detection thresholds (config-driven with safe defaults)
+    static constexpr double DEFAULT_LIFTOFF_ACCEL_THRESHOLD_G = 3.0;
+    static constexpr unsigned long DEFAULT_LIFTOFF_DURATION_MS = 100;
+    static constexpr double DEFAULT_BURNOUT_ACCEL_THRESHOLD_G = 1.5;
+    static constexpr unsigned long DEFAULT_BURNOUT_DURATION_MS = 200;
+    static constexpr double DEFAULT_APOGEE_VELOCITY_THRESHOLD = 2.0;    // m/s
+    static constexpr double DEFAULT_LANDING_VELOCITY_THRESHOLD = 1.0;   // m/s
+    static constexpr unsigned long DEFAULT_LANDING_DURATION_MS = 3000;   // ms
 
     // Descent rate detection thresholds
     static constexpr double DROGUE_DESCENT_MIN = 5.0;           // m/s minimum under drogue
@@ -138,6 +138,15 @@ private:
     static constexpr double MAIN_DEPLOY_ALTITUDE = 400.0;       // m AGL to start expecting main
     static constexpr unsigned long DROGUE_DETECT_DURATION = 2000; // ms to confirm drogue
     static constexpr unsigned long MAIN_DETECT_DURATION = 2000;   // ms to confirm main
+
+    // Config-resolved thresholds.
+    double liftoffAccelThresholdMs2() const;
+    unsigned long liftoffDurationMs() const;
+    double burnoutAccelThresholdMs2() const;
+    unsigned long burnoutDurationMs() const;
+    double apogeeVelocityThresholdMs() const;
+    double landingVelocityThresholdMs() const;
+    unsigned long landingDurationMs() const;
 
     // Tracking for sustained condition detection
     unsigned long highAccelStartTime;
@@ -150,6 +159,7 @@ private:
     bool lowVelocityDetected;
     bool drogueRateDetected;
     bool mainRateDetected;
+    const AstraRocketConfig *flightConfig;
 };
 
 } // namespace astra_rocket
