@@ -4,7 +4,6 @@
 #include <RecordData/Logging/DataLogger.h>
 #include <BlinkBuzz/BlinkBuzz.h>
 #include "RadioLog.h"
-#include <Sensors/HITL/HITL.h>
 
 #ifndef ASTRA_ROCKET_VERSION
 #define ASTRA_ROCKET_VERSION "UNKNOWN"
@@ -12,32 +11,22 @@
 
 namespace astra_rocket
 {
-    AstraRocket *AstraRocket::s_activeInstance = nullptr;
-
     AstraRocket::AstraRocket(AstraRocketConfig &cfg)
         : config(cfg),
           astraSys(nullptr),
           rocketState(nullptr),
           kalmanFilter(nullptr),
           orientationFilter(nullptr),
-          hitlAccel(nullptr),
-          hitlGyro(nullptr),
-          hitlMag(nullptr),
-          hitlBaro(nullptr),
-          hitlGps(nullptr),
           dataSinks(nullptr),
           eventSinks(nullptr),
           numDataSinks(0),
           numEventSinks(0),
-          groundLevelAltitude(0),
-          hitlGroundLevelSet(false)
+          groundLevelAltitude(0)
     {
     }
 
     AstraRocket::~AstraRocket()
     {
-        if (s_activeInstance == this)
-            s_activeInstance = nullptr;
         if (astraSys)
             delete astraSys;
         if (rocketState)
@@ -46,16 +35,6 @@ namespace astra_rocket
             delete kalmanFilter;
         if (orientationFilter)
             delete orientationFilter;
-        if (hitlAccel)
-            delete hitlAccel;
-        if (hitlGyro)
-            delete hitlGyro;
-        if (hitlMag)
-            delete hitlMag;
-        if (hitlBaro)
-            delete hitlBaro;
-        if (hitlGps)
-            delete hitlGps;
         if (dataSinks)
             delete[] dataSinks;
         if (eventSinks)
@@ -92,28 +71,18 @@ namespace astra_rocket
 
         // Create Astra system
         astraSys = new Astra(&config);
-        astraSys->init();
+        int initErrors = astraSys->init();
+        if (initErrors > 0)
+        {
+            LOGW("Astra initialized with %d sensor error(s).", initErrors);
+        }
         LOGI("Astra system initialized successfully. Reading sensors to establish baseline.");
 
         // Establish ground level reference
         if (config.getHITLEnabled())
         {
-            // In HITL mode, skip initial ground level setup
-            // It will be established on first valid HITL packet
-            LOGI("HITL mode: Ground level will be set from first simulation packet");
-
-            // Register HITL handler with Astra's SerialMessageRouter
-            s_activeInstance = this;
-            SerialMessageRouter *router = astraSys->getMessageRouter();
-            if (router)
-            {
-                router->withListener("HITL/", AstraRocket::handleHITLMessage);
-            }
-            else
-            {
-                LOGE("Astra message router not available - HITL cannot continue.");
-                return false;
-            }
+            // Astra core now owns HITL routing/parsing and baseline setup.
+            LOGI("HITL mode enabled. Astra core will process HITL packets.");
         }
         else
         {
@@ -170,21 +139,9 @@ namespace astra_rocket
             LOGE("AstraRocket not initialized!");
             return;
         }
-        // Check if HITL mode is enabled
-        if (config.getHITLEnabled())
-        {
-            // HITL mode: router handles all incoming HITL/ messages
-            SerialMessageRouter *router = astraSys->getMessageRouter();
-            if (router)
-                router->update();
-            return;
-        }
-        else
-        {
 
-            // Normal hardware mode: update with real time
-            astraSys->update();
-        }
+        // Astra::update() handles both hardware and HITL modes.
+        astraSys->update();
     }
 
     // ===== Private Helper Methods =====
@@ -228,33 +185,4 @@ namespace astra_rocket
         }
     }
 
-    void AstraRocket::handleHITLMessage(const char *message, const char *prefix, Stream *source)
-    {
-        (void)prefix;
-        (void)source;
-
-        if (!s_activeInstance || !message)
-            return;
-
-        double simTime = 0.0;
-        if (!HITLParser::parse(message, simTime))
-        {
-            LOGE("AstraRocket::handleHITLMessage() - HITL parse FAILED");
-            return;
-        }
-
-        s_activeInstance->astraSys->update(simTime);
-
-        if (!s_activeInstance->hitlGroundLevelSet)
-        {
-            SensorManager *sm = s_activeInstance->config.getSensorManager();
-            if (sm && sm->getBaroSource() && sm->getBaroSource()->isInitialized())
-            {
-                s_activeInstance->groundLevelAltitude = sm->getBaroSource()->getASLAltM();
-                s_activeInstance->rocketState->setGroundLevel(s_activeInstance->groundLevelAltitude);
-                s_activeInstance->hitlGroundLevelSet = true;
-                LOGI("HITL ground level established: %0.2f m MSL", s_activeInstance->groundLevelAltitude);
-            }
-        }
-    }
 } // namespace astra_rocket
