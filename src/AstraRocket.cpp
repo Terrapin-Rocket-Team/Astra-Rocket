@@ -3,7 +3,7 @@
 #include <RecordData/Logging/EventLogger.h>
 #include <RecordData/Logging/DataLogger.h>
 #include <BlinkBuzz/BlinkBuzz.h>
-#include "RadioLog.h"
+#include "RecordData/Logging/LoggingBackend/RadioLog.h"
 
 #ifndef ASTRA_ROCKET_VERSION
 #define ASTRA_ROCKET_VERSION "UNKNOWN"
