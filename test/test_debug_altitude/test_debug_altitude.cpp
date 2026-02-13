@@ -73,6 +73,7 @@ void test_debug_altitude() {
     // Advance time and call update to pull KF state into RocketState
     setMillis(20);
     double currentTime = millis() / 1000.0;
+    state->predictState(currentTime);
     state->update(currentTime);
 
     // Verify altitude is read correctly from KF state
