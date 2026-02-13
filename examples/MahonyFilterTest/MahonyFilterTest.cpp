@@ -71,7 +71,7 @@ int calibrationCount = 0;
 
 void setup() {
     bmi088.setMountingOrientation(MountingOrientation::FLIP_XZ);  // Adjust based on your mounting
-    magnetometer.setMountingOrientation(MountingOrientation::FLIP_XY);  // Adjust based on your mounting
+    magnetometer.setMountingOrientation(MountingOrientation::ROTATE_90_Z);  // Adjust based on your mounting
     Serial.begin(115200);
     while (!Serial && millis() < 5000) {
         delay(10);
