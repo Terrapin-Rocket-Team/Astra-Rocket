@@ -3,7 +3,6 @@
 #include <RecordData/Logging/EventLogger.h>
 #include <RecordData/Logging/DataLogger.h>
 #include <BlinkBuzz/BlinkBuzz.h>
-#include "RecordData/Logging/LoggingBackend/RadioLog.h"
 
 #ifndef ASTRA_ROCKET_VERSION
 #define ASTRA_ROCKET_VERSION "UNKNOWN"
@@ -152,29 +151,37 @@ namespace astra_rocket
         dataSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS];
         eventSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS];
 
-        // USB log for debugging - use PrintLog which works with any Print object
-        Serial.begin(115200);
-        PrintLog *usbLog = new PrintLog(Serial, true);
-        dataSinks[numDataSinks++] = usbLog;
-        eventSinks[numEventSinks++] = usbLog;
+#if defined(ENV_TEENSY) && !defined(NATIVE)
+        // SD card is the only full telemetry/event sink.
+        FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
+        FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
 
-        // RadioLog *rad = new RadioLog(*config.getRadioSerial());
-        // dataSinks[numDataSinks++] = rad;
+        eventSinks[numEventSinks++] = sdEventLog;
+        dataSinks[numDataSinks++] = sdDataLog;
 
-        // SD card log for data recording
-        // FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
-        // FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
+        eventSinks[numEventSinks++] = new PrintLog(Serial, true);
 
-        // eventSinks[numEventSinks++] = sdEventLog;
-        // dataSinks[numDataSinks++] = sdDataLog;
-
-        // Configure EventLogger
+#endif
+        // Configure EventLogger (initializes event sinks).
         EventLogger::configure(eventSinks, numEventSinks);
 
-        // Now that EventLogger is configured, log the summary
+        // Event sink status summary
         for (int i = 0; i < numEventSinks; i++)
         {
             if (eventSinks[i]->ok())
+            {
+                LOGI("Event sink %d ok.", i);
+            }
+            else
+            {
+                LOGW("Event sink %d FAILED", i);
+            }
+        }
+        DataLogger::configure(dataSinks, numDataSinks);
+        // Data sink status summary (includes radio telemetry sink).
+        for (int i = 0; i < numDataSinks; i++)
+        {
+            if (dataSinks[i]->ok())
             {
                 LOGI("Data sink %d ok.", i);
             }
