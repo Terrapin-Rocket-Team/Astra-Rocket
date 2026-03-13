@@ -200,39 +200,44 @@ void test_burnout_at_threshold() {
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 }
 
-void test_burnout_above_threshold() {
-    // Test that 1.6G doesn't trigger burnout
+void test_burnout_strong_downward_acceleration() {
+    // Strong downward acceleration still qualifies as burnout because the
+    // signed vertical acceleration has already fallen below the threshold.
     state->setFlightStage(FlightStage::BOOST);
     setStateAndUpdate(100.0, 50.0, -30.0, 1000);
 
-    // Set 1.6G (15.7 m/s²) - above threshold
+    // This starts the burnout timer but should not transition immediately.
     setStateAndUpdate(105.0, 52.0, -15.7, 1050);
+    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
 
-    // Even after long time, should stay in boost
+    // Sustained low/negative vertical acceleration transitions to coast.
     setStateAndUpdate(120.0, 58.0, -15.7, 1500);
-    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
-}
-
-void test_burnout_timing_boundary() {
-    // Test that exactly 200ms is sufficient for burnout
-    state->setFlightStage(FlightStage::BOOST);
-    setStateAndUpdate(100.0, 50.0, -30.0, 1000);
-
-    // Drop to low acceleration
-    setStateAndUpdate(102.0, 51.0, -9.81, 1010);
-    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
-
-    // At 199ms - should not trigger
-    setStateAndUpdate(110.0, 54.0, -9.81, 1209);
-    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
-
-    // At 201ms - should trigger
-    setStateAndUpdate(112.0, 55.0, -9.81, 1211);
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 }
 
-void test_burnout_fluctuating_acceleration() {
-    // Test that rapid fluctuations don't cause premature burnout
+void test_burnout_timing_boundary() {
+    // With signed vertical acceleration, this fixture is already below the
+    // burnout threshold at 1000ms, so the debounce window starts there.
+    state->setFlightStage(FlightStage::BOOST);
+    setStateAndUpdate(100.0, 50.0, -30.0, 1000);
+    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
+
+    // Still below the threshold.
+    setStateAndUpdate(102.0, 51.0, -9.81, 1010);
+    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
+
+    // At 199ms after the first qualifying sample, it should not trigger yet.
+    setStateAndUpdate(110.0, 54.0, -9.81, 1199);
+    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
+
+    // At 201ms it should trigger.
+    setStateAndUpdate(112.0, 55.0, -9.81, 1201);
+    TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
+}
+
+void test_burnout_fluctuating_negative_acceleration() {
+    // Fluctuations that remain below the signed threshold should still
+    // accumulate toward burnout.
     state->setFlightStage(FlightStage::BOOST);
     setStateAndUpdate(100.0, 50.0, -30.0, 1000);
 
@@ -242,8 +247,8 @@ void test_burnout_fluctuating_acceleration() {
         setStateAndUpdate(100.0 + i, 50.0 + i, accel, 1000 + i * 50);
     }
 
-    // Should still be in boost - fluctuations reset the timer
-    TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
+    // All samples are still below the signed threshold, so burnout should occur.
+    TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 }
 
 void test_multiple_motor_burns() {
@@ -257,6 +262,7 @@ void test_multiple_motor_burns() {
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 
     // Second motor ignition (manual override - would be commanded in real system)
+    // The manual stage change should clear stale burnout debounce state.
     state->setFlightStage(FlightStage::BOOST);
     setStateAndUpdate(130.0, 56.0, -35.0, 2000);
     TEST_ASSERT_EQUAL(FlightStage::BOOST, state->getFlightStage());
@@ -273,34 +279,41 @@ void test_multiple_motor_burns() {
 // ================================================================================
 
 void test_apogee_nominal() {
-    // Test normal apogee detection when velocity goes negative
+    // Apogee is only declared once descent is clearly underway.
     state->setFlightStage(FlightStage::COAST);
     setStateAndUpdate(500.0, 5.0, 5000);
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 
-    // Velocity crosses zero (going negative)
+    // Slightly negative velocity is still too close to zero.
     setStateAndUpdate(501.0, -0.1, 5050);
+    TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
+
+    // Clear descent beyond the threshold triggers apogee.
+    setStateAndUpdate(500.8, -2.1, 5100);
     TEST_ASSERT_EQUAL(FlightStage::APOGEE, state->getFlightStage());
 }
 
 void test_apogee_at_velocity_threshold() {
-    // Test apogee detection at 2.0 m/s threshold (needs to be < 2.0)
+    // Apogee detection occurs at the exact descent threshold.
     state->setFlightStage(FlightStage::COAST);
     setStateAndUpdate(500.0, 2.5, 5000);
     TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
 
-    // Drop to just below 2.0 m/s
-    setStateAndUpdate(502.0, 1.9, 5050);
+    setStateAndUpdate(501.0, -2.0, 5050);
     TEST_ASSERT_EQUAL(FlightStage::APOGEE, state->getFlightStage());
 }
 
-void test_apogee_very_low_velocity() {
-    // Test apogee at very low velocity (< 0.5 m/s)
+void test_apogee_very_low_velocity_no_detection() {
+    // Slow upward motion near zero is still not enough to declare apogee.
     state->setFlightStage(FlightStage::COAST);
     setStateAndUpdate(500.0, 3.0, 5000);
 
-    // Drop to very low velocity
+    // Still climbing slowly.
     setStateAndUpdate(501.0, 0.3, 5100);
+    TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
+
+    // Apogee arrives once the vehicle is descending decisively.
+    setStateAndUpdate(500.5, -2.3, 5200);
     TEST_ASSERT_EQUAL(FlightStage::APOGEE, state->getFlightStage());
 }
 
@@ -737,10 +750,12 @@ void test_complete_nominal_flight_sequence() {
 
     // 4. APOGEE
     setStateAndUpdate(500.0, 1.0, 10000);
+    TEST_ASSERT_EQUAL(FlightStage::COAST, state->getFlightStage());
+    setStateAndUpdate(499.5, -2.2, 10100);
     TEST_ASSERT_EQUAL(FlightStage::APOGEE, state->getFlightStage());
 
     // 5. EXPECTING_DROGUE (needs velocity < -2.0 m/s)
-    setStateAndUpdate(499.0, -2.5, 10100);
+    setStateAndUpdate(498.0, -2.5, 10200);
     TEST_ASSERT_EQUAL(FlightStage::EXPECTING_DROGUE, state->getFlightStage());
 
     // 6. UNDER_DROGUE
@@ -822,15 +837,15 @@ int main(int argc, char **argv) {
     // Burnout tests
     RUN_TEST(test_burnout_nominal);
     RUN_TEST(test_burnout_at_threshold);
-    RUN_TEST(test_burnout_above_threshold);
+    RUN_TEST(test_burnout_strong_downward_acceleration);
     RUN_TEST(test_burnout_timing_boundary);
-    RUN_TEST(test_burnout_fluctuating_acceleration);
+    RUN_TEST(test_burnout_fluctuating_negative_acceleration);
     RUN_TEST(test_multiple_motor_burns);
 
     // Apogee tests
     RUN_TEST(test_apogee_nominal);
     RUN_TEST(test_apogee_at_velocity_threshold);
-    RUN_TEST(test_apogee_very_low_velocity);
+    RUN_TEST(test_apogee_very_low_velocity_no_detection);
     RUN_TEST(test_apogee_high_velocity_no_detection);
     RUN_TEST(test_apogee_to_expecting_drogue_transition);
 

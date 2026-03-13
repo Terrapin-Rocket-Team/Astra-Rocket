@@ -43,13 +43,15 @@ public:
 
     /**
      * Set motor burnout acceleration threshold (G's)
+     * Burnout is detected once signed earth-frame vertical acceleration
+     * falls to or below this threshold
      * Default: 1.5 G
      */
     AstraRocketConfig& withBurnoutAccelThreshold(double accelG);
 
     /**
      * Set apogee velocity threshold (m/s)
-     * Vertical velocity must be below this to detect apogee
+     * Apogee is detected once vertical velocity is at or below -threshold
      * Default: 2.0 m/s
      */
     AstraRocketConfig& withApogeeVelocityThreshold(double velocityMs);

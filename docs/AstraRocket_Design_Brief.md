@@ -31,8 +31,8 @@ Implements flight stage detection state machine and tracks rocket-specific telem
 
 **Flight stages** (9 total):
 - PAD_IDLE → BOOST (accel > 3G for 100ms)
-- BOOST → COAST (accel < 1.5G for 200ms)
-- COAST → APOGEE (vertical velocity < 2 m/s)
+- BOOST → COAST (signed vertical accel ≤ +1.5G for 200ms)
+- COAST → APOGEE (vertical velocity ≤ -2 m/s, or fallback after very long coast)
 - APOGEE → EXPECTING_DROGUE (descending)
 - EXPECTING_DROGUE → UNDER_DROGUE (descent rate slows to 5-40 m/s)
 - UNDER_DROGUE → EXPECTING_MAIN (altitude < 400m AGL)

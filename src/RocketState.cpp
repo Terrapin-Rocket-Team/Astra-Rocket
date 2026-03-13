@@ -61,6 +61,16 @@ namespace astra_rocket
             currentStage = stage;
             stageStartTime = (unsigned long)(currentTime * 1000.0);
             timeInCurrentStage = 0;
+            highAccelDetected = false;
+            lowAccelDetected = false;
+            lowVelocityDetected = false;
+            drogueRateDetected = false;
+            mainRateDetected = false;
+            highAccelStartTime = 0;
+            lowAccelStartTime = 0;
+            lowVelocityStartTime = 0;
+            drogueDetectStartTime = 0;
+            mainDetectStartTime = 0;
             LOGI("Flight stage transition: %s -> %s",
                  flightStageToString(previousStage),
                  flightStageToString(currentStage));
@@ -503,8 +513,8 @@ namespace astra_rocket
         }
 
         case BOOST:
-            // Detect motor burnout: earth-frame acceleration magnitude drops to or below threshold
-            // Use earth-frame acceleration (from State), not raw accelerometer reading
+            // Detect motor burnout once signed earth-frame vertical acceleration
+            // drops to or below the configured threshold.
             {
                 const double verticalAccel = acceleration.z();
 
@@ -531,7 +541,6 @@ namespace astra_rocket
 
         case COAST:
             // Detect apogee once descent is clearly underway.
-            // This avoids false zero-crossings from estimator noise while still climbing.
             if (velocity.z() <= -apogeeVelThresh)
             {
                 newStage = APOGEE;

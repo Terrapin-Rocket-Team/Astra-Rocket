@@ -162,7 +162,6 @@ namespace astra_rocket
         eventSinks[numEventSinks++] = new PrintLog(Serial, true);
 
 #endif
-#endif
         // Configure EventLogger (initializes event sinks). (initializes event sinks).
         EventLogger::configure(eventSinks, numEventSinks);
 
