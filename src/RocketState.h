@@ -163,7 +163,6 @@ private:
     bool drogueRateDetected;
     bool mainRateDetected;
     bool padFilterZeroed;
-    double currentTimeSeconds;
     const AstraRocketConfig *flightConfig;
 };
 
