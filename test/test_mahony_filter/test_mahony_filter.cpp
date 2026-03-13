@@ -1,6 +1,6 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
-#include <UnitTestSensors.h>
+#include "../mocks/UnitTestSensors.h"
 #include <Filters/Mahony.h>
 #include <Math/Vector.h>
 #include <cmath>

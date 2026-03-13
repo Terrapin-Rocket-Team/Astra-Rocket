@@ -39,6 +39,7 @@ namespace astra_rocket
           drogueRateDetected(false),
           mainRateDetected(false),
           padFilterZeroed(false),
+          currentTimeSeconds(0.0),
           flightConfig(config)
     {
         // Add rocket-specific columns to DataReporter
@@ -59,7 +60,7 @@ namespace astra_rocket
         {
             previousStage = currentStage;
             currentStage = stage;
-            stageStartTime = (unsigned long)(currentTime * 1000.0);
+            stageStartTime = (unsigned long)(currentTimeSeconds * 1000.0);
             timeInCurrentStage = 0;
             highAccelDetected = false;
             lowAccelDetected = false;
@@ -155,13 +156,18 @@ namespace astra_rocket
         acceleration.z() = earthAccel.z();
     }
 
-    int RocketState::update(double currentTimeSec)
+    int RocketState::update()
     {
         // Call parent implementation first - handles measurement update
-        int success = State::update(currentTimeSec);
+        int success = State::update();
+
+        // DataReporter::update() no longer accepts a timestamp, so RocketState
+        // tracks wall-clock time locally for stage dwell timers and tests can
+        // seed it via predictState().
+        currentTimeSeconds = millis() / 1000.0;
 
         // Update time in current stage
-        unsigned long currentMillis = (unsigned long)(currentTime * 1000.0);
+        unsigned long currentMillis = (unsigned long)(currentTimeSeconds * 1000.0);
         timeInCurrentStage = (currentMillis - stageStartTime) / 1000.0;
 
         if (!frameLocked && currentStage == PAD_IDLE)
@@ -178,6 +184,9 @@ namespace astra_rocket
 
     void RocketState::predict(double dt)
     {
+        if (dt > 0.0)
+            currentTimeSeconds += dt;
+
         if (currentStage == PAD_IDLE)
         {
             if (filter && !padFilterZeroed)
@@ -216,7 +225,7 @@ namespace astra_rocket
         if (currentTimeSec == -1)
             currentTimeSec = millis() / 1000.0;
 
-        currentTime = currentTimeSec;
+        currentTimeSeconds = currentTimeSec;
 
         if (orientationFilter && orientationFilter->isReady())
         {
@@ -464,7 +473,7 @@ namespace astra_rocket
 
     void RocketState::detectFlightStage()
     {
-        unsigned long now = (unsigned long)(currentTime * 1000.0);
+        unsigned long now = (unsigned long)(currentTimeSeconds * 1000.0);
         FlightStage newStage = currentStage;
         const double liftoffAccelThresh = liftoffAccelThresholdMs2();
         const unsigned long liftoffDuration = liftoffDurationMs();

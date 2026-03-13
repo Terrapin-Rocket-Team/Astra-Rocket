@@ -1,6 +1,6 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
-#include <UnitTestSensors.h>
+#include "../mocks/UnitTestSensors.h"
 
 // include other headers you need to test here
 #include "../../src/AstraRocketConfig.h"

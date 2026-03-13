@@ -1,6 +1,6 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
-#include <UnitTestSensors.h>
+#include "../mocks/UnitTestSensors.h"
 #include <Sensors/SensorManager/SensorManager.h>
 #include "../../src/RocketState.h"
 #include "../mocks/MockLinearKalmanFilter.h"
@@ -74,7 +74,7 @@ void test_debug_altitude() {
     setMillis(20);
     double currentTime = millis() / 1000.0;
     state->predictState(currentTime);
-    state->update(currentTime);
+    state->update();
 
     // Verify altitude is read correctly from KF state
     double agl = state->getAltitudeAGL();

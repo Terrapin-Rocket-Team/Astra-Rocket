@@ -1,6 +1,6 @@
 #include <unity.h>
 #include <NativeTestHelper.h>
-#include <UnitTestSensors.h>
+#include "../mocks/UnitTestSensors.h"
 #include <Sensors/SensorManager/SensorManager.h>
 #include "../../src/RocketState.h"
 #include "../mocks/MockLinearKalmanFilter.h"
@@ -77,7 +77,7 @@ void setStateAndUpdate(double altitude, double velocity, double accelZ, unsigned
 
     // Call both predictState and update to properly populate state variables
     state->predictState(timeSec);
-    state->update(timeSec);
+    state->update();
 }
 
 // Overload without acceleration for cases where we don't care about accel

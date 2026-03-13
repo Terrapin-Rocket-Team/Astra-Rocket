@@ -72,7 +72,7 @@ public:
      */
     void updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, const Vector<3> &mag, double dt) override;
 
-    int update(double currentTimeSec = -1) override;
+    int update() override;
     void predict(double dt) override;
     void updateGPSMeasurement(const Vector<3> &gpsPos, const Vector<3> &gpsVel) override;
     void updateBaroMeasurement(double baroAlt) override;
@@ -163,6 +163,7 @@ private:
     bool drogueRateDetected;
     bool mainRateDetected;
     bool padFilterZeroed;
+    double currentTimeSeconds;
     const AstraRocketConfig *flightConfig;
 };
 
