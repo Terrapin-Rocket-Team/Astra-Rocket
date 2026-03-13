@@ -143,7 +143,10 @@ public:
 
     SerialUART_t* getRadioSerial() const { return radioSerial; }
 
-    bool getHITLEnabled() const { return hitlMode; }
+    RuntimeMode getRuntimeMode() const { return runtimeMode; }
+    bool getSimulationEnabled() const { return runtimeMode != RuntimeMode::Hardware; }
+    bool getHITLEnabled() const { return getSimulationEnabled(); }
+    bool getSITLEnabled() const { return runtimeMode == RuntimeMode::SITL; }
 
 private:
     // Flight detection thresholds

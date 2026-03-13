@@ -27,14 +27,6 @@ void setup()
 {
     // Initialize Serial for USB communication
     Serial.begin(115200);
-    if (Serial.connectSITL("localhost", 5555))
-    {
-        Serial.println("Connected to SITL");
-    }
-    else
-    {
-        Serial.println("Failed to connect to SITL");
-    }
 
     // Wait for Serial connection (optional, comment out for flight)
     while (!Serial && millis() < 5000)
@@ -51,7 +43,7 @@ void setup()
     // Configure rocket for HITL mode
     // NOTE: config must be static because AstraRocket stores a reference to it
     static AstraRocketConfig config;
-    config.withHITL(true); // Enable HITL mode
+    config.withHITL(); // Enable HITL mode and let Astra own packet routing
 
     // Create rocket with HITL configuration
     rocket = new AstraRocket(config);

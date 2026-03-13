@@ -113,7 +113,7 @@ The HITL-enabled flight computer code is extremely simple:
 ```cpp
 // Enable HITL mode in config
 AstraRocketConfig config;
-config.withHITL(true);
+config.withHITL();
 
 AstraRocket rocket(config);
 rocket.init();

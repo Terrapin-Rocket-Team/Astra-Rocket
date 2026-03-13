@@ -34,11 +34,12 @@ AstraRocketConfig::AstraRocketConfig()
       preflightLogRate(1.0),
       flightLogRate(50.0),
       postflightLogRate(1.0),
-      flashBackup(false)
-      #ifdef ENV_TEENSY
-      ,radioSerial(&Serial2)
-      #endif
+      flashBackup(false),
+      radioSerial(nullptr)
 {
+#ifdef ENV_TEENSY
+    radioSerial = &Serial2;
+#endif
 }
 
 // Flight detection thresholds

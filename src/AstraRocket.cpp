@@ -78,10 +78,10 @@ namespace astra_rocket
         LOGI("Astra system initialized successfully. Reading sensors to establish baseline.");
 
         // Establish ground level reference
-        if (config.getHITLEnabled())
+        if (config.getSimulationEnabled())
         {
-            // Astra core now owns HITL routing/parsing and baseline setup.
-            LOGI("HITL mode enabled. Astra core will process HITL packets.");
+            // Astra core now owns HITL/SITL routing, timing, and baseline setup.
+            LOGI("Simulation mode enabled. Astra core will process simulator packets.");
         }
         else
         {
@@ -126,8 +126,8 @@ namespace astra_rocket
 
     void AstraRocket::configureHITLMode()
     {
-        // HITL policy is handled in Astra core via AstraConfig::withHITL().
-        config.withHITL(true);
+        // Astra core now owns HITL routing and default sensor installation.
+        config.withHITL();
     }
 
     void AstraRocket::update()
