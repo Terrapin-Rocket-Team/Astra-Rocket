@@ -91,7 +91,7 @@ Examples:
     parser.add_argument('--rotation', type=float, nargs=3, metavar=('ROLL', 'PITCH', 'YAW'),
                        help="Apply specific rotation in degrees (e.g., --rotation 0 10 45)")
     parser.add_argument('--noise', action='store_true', help="Add Gaussian noise to sensor data")
-    parser.add_argument('--accel-noise', type=float, default=0.05, help="Accelerometer noise std dev (m/s²), default=0.05")
+    parser.add_argument('--accel-noise', type=float, default=0.05, help="Accelerometer noise std dev (m/s\u00b2), default=0.05")
     parser.add_argument('--gyro-noise', type=float, default=0.01, help="Gyroscope noise std dev (rad/s), default=0.01")
     parser.add_argument('--mag-noise', type=float, default=0.5, help="Magnetometer noise std dev (uT), default=0.5")
     parser.add_argument('--baro-noise', type=float, default=0.5, help="Barometer noise std dev (hPa), default=0.5")
@@ -153,9 +153,8 @@ Examples:
             try:
                 sitl_process = subprocess.Popen(
                     [sitl_exe_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=0
+                    stdout=None,
+                    stderr=None
                 )
                 print(f"{Colors.OKGREEN}[SITL]{Colors.ENDC} Process started (PID: {Colors.BOLD}{sitl_process.pid}{Colors.ENDC})")
                 # Give it a moment to start up
@@ -277,9 +276,9 @@ Examples:
     time.sleep(1.0)
 
     # --- 5. Main Loop ---
-    print(f"\n{Colors.BOLD}{Colors.HEADER}╔═══════════════════════════════════════════════════════════════╗{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}║          Starting LOCK-STEP Simulation                        ║{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.HEADER}╚═══════════════════════════════════════════════════════════════╝{Colors.ENDC}\n")
+    print(f"\n{Colors.BOLD}{Colors.HEADER}+----------------------------------------------------------------+{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}|          Starting LOCK-STEP Simulation                        |{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.HEADER}+----------------------------------------------------------------+{Colors.ENDC}\n")
     print(f"{Colors.BOLD}{Colors.OKCYAN}{'Time (s)':<9} | {'SimAlt':<8} | {'FC Alt':<8} | {'Events':<30}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.OKCYAN}{'-'*9}-+-{'-'*8}-+-{'-'*8}-+-{'-'*30}{Colors.ENDC}")
 
@@ -316,6 +315,7 @@ Examples:
 
             packet = sim.get_next_packet()
             pkt_count += 1
+
             msg = packet.to_hitl_string().encode()
 
             # B. Send & Wait (Retry Logic)
@@ -360,7 +360,7 @@ Examples:
 
             if attempts >= max_retries:
                 if pkt_count % 50 == 0:
-                     print(f"\r{Colors.WARNING}[FC] Timeout - Packet {pkt_count} skipped.{Colors.ENDC}\033[K", end='')
+                     print(f"{Colors.WARNING}[FC] Timeout - Packet {pkt_count} skipped.{Colors.ENDC}")
                 continue # Skip this step
 
             # C. Parse Response
@@ -384,7 +384,7 @@ Examples:
                         return default
 
                     fc_alt_str = get_fc(["State - PZ (m)", "Alt", "State - Alt (m)"], "0")
-                    fc_accel_str = get_fc(["State - AZ (m/s/s)", "State - AZ (m/s^2)", "State - AZ (m/s²)", "Accel Z", "AZ", "State - AZ"], "0")
+                    fc_accel_str = get_fc(["State - AZ (m/s/s)", "State - AZ (m/s^2)", "State - AZ (m/s\u00b2)", "Accel Z", "AZ", "State - AZ"], "0")
                     fc_accel_x_str = get_fc(["State - AX (m/s/s)", "State - AX (m/s^2)", "State - AX"], "0")
                     fc_accel_y_str = get_fc(["State - AY (m/s/s)", "State - AY (m/s^2)", "State - AY"], "0")
                     fc_vel_x_str = get_fc(["State - VX (m/s)", "State - VX"], "0")
@@ -462,8 +462,7 @@ Examples:
                 event_str = f"{stage_color}STAGE: {stage_display}{Colors.ENDC}"
                 print(f"\r{Colors.BRIGHT_YELLOW}{time_str}{Colors.ENDC} | {Colors.OKCYAN}{sim_alt_str}{Colors.ENDC} | {Colors.WARNING}{fc_alt_str}{Colors.ENDC} | {event_str}\033[K")
             elif pkt_count % 50 == 0:
-                sys.stdout.write(f"\r{Colors.GRAY}{time_str} | {sim_alt_str} | {fc_alt_str} | {stage_color}{stage_display}{Colors.ENDC}\033[K")
-                sys.stdout.flush()
+                print(f"{Colors.GRAY}{time_str} | {sim_alt_str} | {fc_alt_str} | {stage_color}{stage_display}{Colors.ENDC}")
 
             last_stage = fc_stage_val
 
