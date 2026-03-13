@@ -73,6 +73,9 @@ public:
     void updateOrientation(const Vector<3> &gyro, const Vector<3> &accel, const Vector<3> &mag, double dt) override;
 
     int update(double currentTimeSec = -1) override;
+    void predict(double dt) override;
+    void updateGPSMeasurement(const Vector<3> &gpsPos, const Vector<3> &gpsVel) override;
+    void updateBaroMeasurement(double baroAlt) override;
 
     // Test/simulation helper: pull KF state into RocketState without full Astra loop
     void predictState(double currentTimeSec = -1);
@@ -159,6 +162,7 @@ private:
     bool lowVelocityDetected;
     bool drogueRateDetected;
     bool mainRateDetected;
+    bool padFilterZeroed;
     const AstraRocketConfig *flightConfig;
 };
 

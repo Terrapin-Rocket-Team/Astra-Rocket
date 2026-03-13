@@ -38,6 +38,7 @@ namespace astra_rocket
           lowVelocityDetected(false),
           drogueRateDetected(false),
           mainRateDetected(false),
+          padFilterZeroed(false),
           flightConfig(config)
     {
         // Add rocket-specific columns to DataReporter
@@ -163,6 +164,41 @@ namespace astra_rocket
         detectFlightStage();
 
         return success;
+    }
+
+    void RocketState::predict(double dt)
+    {
+        if (currentStage == PAD_IDLE)
+        {
+            if (filter && !padFilterZeroed)
+            {
+                filter->initialize();
+                padFilterZeroed = true;
+            }
+
+            position = Vector<3>(0, 0, 0);
+            velocity = Vector<3>(0, 0, 0);
+            return;
+        }
+
+        padFilterZeroed = false;
+        State::predict(dt);
+    }
+
+    void RocketState::updateGPSMeasurement(const Vector<3> &gpsPos, const Vector<3> &gpsVel)
+    {
+        if (currentStage == PAD_IDLE)
+            return;
+
+        State::updateGPSMeasurement(gpsPos, gpsVel);
+    }
+
+    void RocketState::updateBaroMeasurement(double baroAlt)
+    {
+        if (currentStage == PAD_IDLE)
+            return;
+
+        State::updateBaroMeasurement(baroAlt);
     }
 
     void RocketState::predictState(double currentTimeSec)
