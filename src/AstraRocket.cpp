@@ -159,8 +159,11 @@ namespace astra_rocket
         eventSinks[numEventSinks++] = sdEventLog;
         dataSinks[numDataSinks++] = sdDataLog;
 
+        eventSinks[numEventSinks++] = new PrintLog(Serial, true);
+
 #endif
-        // Configure EventLogger (initializes event sinks).
+#endif
+        // Configure EventLogger (initializes event sinks). (initializes event sinks).
         EventLogger::configure(eventSinks, numEventSinks);
 
         // Event sink status summary
