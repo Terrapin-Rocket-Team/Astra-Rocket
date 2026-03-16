@@ -41,6 +41,13 @@ public:
     double getOffVerticalAngle() const { return offVerticalAngle; }
 
     /**
+     * Get rocket-frame orientation in earth coordinates.
+     * This differs from State::getOrientation(), which is kept as board->earth
+     * for compatibility with older Astra plumbing.
+     */
+    Quaternion getRocketOrientation() const;
+
+    /**
      * Get altitude above ground level (meters)
      */
     double getAltitudeAGL() const { return position.z(); }
@@ -116,10 +123,10 @@ private:
     // Helper methods
     void detectFlightStage();
     void calculateTilt();
-    void updateMountingAlignment();
+    void updateMountingAlignment(const Vector<3> &accel);
+    void snapPadOrientation(const Vector<3> &accel);
     void computeMountingQuaternion(UpAxis axis);
-    UpAxis chooseUpAxis(double &bestDot) const;
-    Quaternion getRocketOrientation() const;
+    UpAxis chooseUpAxis(const Vector<3> &accel, double &bestDot) const;
 
     // Alignment tuning
     static constexpr double AXIS_SWITCH_DOT_THRESHOLD = 0.90;

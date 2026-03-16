@@ -151,6 +151,17 @@ namespace astra_rocket
         dataSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS];
         eventSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS];
 
+#if !defined(NATIVE)
+        // Mirror Astra event logs to the USB console during bring-up on embedded targets.
+        eventSinks[numEventSinks++] = new PrintLog(Serial, true);
+#endif
+
+#if defined(ENV_STM) && !defined(NATIVE)
+        // Store event logs on the configured STM32 storage backend (defaults to eMMC).
+        eventSinks[numEventSinks++] = new FileLogSink("events.log", config.getStorageBackend(), false);
+        dataSinks[numDataSinks++] = new FileLogSink("data.csv", config.getStorageBackend(), false);
+#endif
+
 #if defined(ENV_TEENSY) && !defined(NATIVE)
         // SD card is the only full telemetry/event sink.
         FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
@@ -158,8 +169,6 @@ namespace astra_rocket
 
         eventSinks[numEventSinks++] = sdEventLog;
         dataSinks[numDataSinks++] = sdDataLog;
-
-        eventSinks[numEventSinks++] = new PrintLog(Serial, true);
 
 #endif
         // Configure EventLogger (initializes event sinks). (initializes event sinks).

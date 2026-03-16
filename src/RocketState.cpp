@@ -82,6 +82,12 @@ namespace astra_rocket
         if (!orientationFilter)
             return;
 
+        if (!frameLocked && currentStage == PAD_IDLE)
+        {
+            updateMountingAlignment(accel);
+            snapPadOrientation(accel);
+        }
+
         if (forceGyroOnly)
         {
             orientationFilter->update(gyro, dt);
@@ -120,6 +126,12 @@ namespace astra_rocket
     {
         if (!orientationFilter)
             return;
+
+        if (!frameLocked && currentStage == PAD_IDLE)
+        {
+            updateMountingAlignment(accel);
+            snapPadOrientation(accel);
+        }
 
         if (forceGyroOnly)
         {
@@ -163,11 +175,6 @@ namespace astra_rocket
         // Update time in current stage
         unsigned long currentMillis = (unsigned long)(currentTimeSeconds * 1000.0);
         timeInCurrentStage = (currentMillis - stageStartTime) / 1000.0;
-
-        if (!frameLocked && currentStage == PAD_IDLE)
-        {
-            updateMountingAlignment();
-        }
 
         // Calculate rocket-specific derived values that depend on orientation
         calculateTilt();
@@ -284,10 +291,16 @@ namespace astra_rocket
         }
     }
 
-    void RocketState::updateMountingAlignment()
+    void RocketState::updateMountingAlignment(const Vector<3> &accel)
     {
+        const double accelMag = accel.magnitude();
+        if (!isfinite(accelMag) || accelMag <= 1e-6)
+        {
+            return;
+        }
+
         double bestDot = 0.0;
-        UpAxis candidate = chooseUpAxis(bestDot);
+        UpAxis candidate = chooseUpAxis(accel, bestDot);
 
         if (candidate == currentUpAxis)
         {
@@ -321,12 +334,78 @@ namespace astra_rocket
         }
     }
 
-    RocketState::UpAxis RocketState::chooseUpAxis(double &bestDot) const
+    void RocketState::snapPadOrientation(const Vector<3> &accel)
     {
-        Vector<3> up(0, 0, 1);
-        Vector<3> bodyX = orientation.rotateVector(Vector<3>(1, 0, 0));
-        Vector<3> bodyY = orientation.rotateVector(Vector<3>(0, 1, 0));
-        Vector<3> bodyZ = orientation.rotateVector(Vector<3>(0, 0, 1));
+        if (!orientationFilter)
+        {
+            return;
+        }
+
+        Vector<3> boardUp = accel;
+        boardUp.normalize();
+        if (boardUp.magnitude() <= 1e-6)
+        {
+            return;
+        }
+
+        const Quaternion boardToRocket = mountQuat_rb.conjugate();
+        Vector<3> rocketUp = boardToRocket.rotateVector(boardUp);
+        rocketUp.normalize();
+
+        Vector<3> earthUp(0, 0, 1);
+        double dot = rocketUp.dot(earthUp);
+        dot = fmax(-1.0, fmin(1.0, dot));
+
+        Quaternion qTilt;
+        if (dot < -0.999999)
+        {
+            Vector<3> axis = Vector<3>(1, 0, 0).cross(rocketUp);
+            if (axis.magnitude() <= 1e-6)
+            {
+                axis = Vector<3>(0, 1, 0).cross(rocketUp);
+            }
+            axis.normalize();
+            qTilt.fromAxisAngle(axis, M_PI);
+        }
+        else if (dot < 0.999999)
+        {
+            Vector<3> axis = rocketUp.cross(earthUp);
+            axis.normalize();
+            qTilt.fromAxisAngle(axis, acos(dot));
+        }
+
+        qTilt.normalize();
+
+        Quaternion qDesired = qTilt;
+        Quaternion qCurrent = orientationFilter->getQuaternion();
+        Vector<3> currentForward = qCurrent.rotateVector(Vector<3>(1, 0, 0));
+        Vector<3> targetForward = qTilt.rotateVector(Vector<3>(1, 0, 0));
+
+        currentForward = currentForward - earthUp * currentForward.dot(earthUp);
+        targetForward = targetForward - earthUp * targetForward.dot(earthUp);
+
+        if (currentForward.magnitude() > 1e-6 && targetForward.magnitude() > 1e-6)
+        {
+            currentForward.normalize();
+            targetForward.normalize();
+
+            double yawDot = fmax(-1.0, fmin(1.0, targetForward.dot(currentForward)));
+            double yawAngle = atan2(targetForward.cross(currentForward).dot(earthUp), yawDot);
+
+            Quaternion qYaw;
+            qYaw.fromAxisAngle(earthUp, yawAngle);
+            qYaw.normalize();
+            qDesired = qYaw * qTilt;
+            qDesired.normalize();
+        }
+
+        orientationFilter->setQuaternion(qDesired);
+    }
+
+    RocketState::UpAxis RocketState::chooseUpAxis(const Vector<3> &accel, double &bestDot) const
+    {
+        Vector<3> boardUp = accel;
+        boardUp.normalize();
 
         struct AxisDot
         {
@@ -335,12 +414,12 @@ namespace astra_rocket
         };
 
         AxisDot candidates[6] = {
-            {POS_X, bodyX.dot(up)},
-            {NEG_X, -bodyX.dot(up)},
-            {POS_Y, bodyY.dot(up)},
-            {NEG_Y, -bodyY.dot(up)},
-            {POS_Z, bodyZ.dot(up)},
-            {NEG_Z, -bodyZ.dot(up)}};
+            {POS_X, boardUp.x()},
+            {NEG_X, -boardUp.x()},
+            {POS_Y, boardUp.y()},
+            {NEG_Y, -boardUp.y()},
+            {POS_Z, boardUp.z()},
+            {NEG_Z, -boardUp.z()}};
 
         UpAxis bestAxis = candidates[0].axis;
         bestDot = candidates[0].dot;
