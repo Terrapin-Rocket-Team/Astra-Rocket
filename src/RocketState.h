@@ -53,6 +53,11 @@ public:
     double getAltitudeAGL() const { return position.z(); }
 
     /**
+     * Get the barometric ground reference used for AGL calculations (meters MSL)
+     */
+    double getGroundLevelMSL() const { return origin.z(); }
+
+    /**
      * Set ground level altitude (for AGL calculations)
      * Typically called during pad idle to establish reference
      */
