@@ -11,6 +11,7 @@
 using namespace astra;
 
 namespace astra_rocket {
+class RocketState;
 
 /**
  * AstraRocketConfig: Configuration builder for rocket flight computers
@@ -24,7 +25,10 @@ namespace astra_rocket {
  */
 class AstraRocketConfig : public AstraConfig {
 public:
+    using AstraConfig::withState;
     AstraRocketConfig();
+
+    AstraRocketConfig& withState(RocketState *state);
 
     // ===== Flight Detection Thresholds =====
 
@@ -140,6 +144,10 @@ public:
     bool getFlashBackup() const { return flashBackup; }
 
     SensorManager *getSensorManager() { return &sensorManager; }
+    State *getConfiguredState() const { return state; }
+    RocketState *getConfiguredRocketState() const { return configuredRocketState; }
+    uint8_t getConfiguredDataLogCount() const { return numLogs; }
+    uint8_t getConfiguredEventLogCount() const { return numEventLogs; }
 
     SerialUART_t* getRadioSerial() const { return radioSerial; }
 
@@ -169,6 +177,7 @@ private:
 
     // Radio configuration
     SerialUART_t *radioSerial;
+    RocketState *configuredRocketState = nullptr;
 };
 
 } // namespace astra_rocket

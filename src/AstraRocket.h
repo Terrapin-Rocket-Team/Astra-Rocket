@@ -87,6 +87,7 @@ namespace astra_rocket
          * Get the underlying Astra system object
          */
         Astra *getAstraSystem() { return astraSys; }
+        SerialMessageRouter *getMessageRouter() { return astraSys ? astraSys->getMessageRouter() : nullptr; }
 
     private:
         bool ready = false;
@@ -104,6 +105,12 @@ namespace astra_rocket
         ILogSink **eventSinks;
         int numDataSinks;
         int numEventSinks;
+        bool ownsRocketState = false;
+        bool ownsKalmanFilter = false;
+        bool ownsOrientationFilter = false;
+        static constexpr int ASTRA_ROCKET_MAX_OWNED_LOG_SINKS = 10;
+        ILogSink *ownedLogSinks[ASTRA_ROCKET_MAX_OWNED_LOG_SINKS] = {};
+        uint8_t numOwnedLogSinks = 0;
 
         // Flight tracking
         unsigned long liftoffTime;
@@ -113,6 +120,7 @@ namespace astra_rocket
         void setupLogging();
         void configureRuntimeMode();
         void configureHITLMode();
+        void rememberOwnedSink(ILogSink *sink);
 
         // Constants
         static constexpr int ASTRA_ROCKET_MAX_SENSORS = 10;
