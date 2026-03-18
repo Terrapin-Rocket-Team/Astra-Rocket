@@ -1,4 +1,5 @@
 #include "AstraRocketConfig.h"
+#include "RocketState.h"
 
 namespace astra_rocket {
 
@@ -40,6 +41,12 @@ AstraRocketConfig::AstraRocketConfig()
 #ifdef ENV_TEENSY
     radioSerial = &Serial2;
 #endif
+}
+
+AstraRocketConfig& AstraRocketConfig::withState(RocketState *state) {
+    configuredRocketState = state;
+    AstraConfig::withState(state);
+    return *this;
 }
 
 // Flight detection thresholds

@@ -28,11 +28,11 @@ namespace astra_rocket
     {
         if (astraSys)
             delete astraSys;
-        if (rocketState)
+        if (ownsRocketState && rocketState)
             delete rocketState;
-        if (kalmanFilter)
+        if (ownsKalmanFilter && kalmanFilter)
             delete kalmanFilter;
-        if (orientationFilter)
+        if (ownsOrientationFilter && orientationFilter)
             delete orientationFilter;
         if (dataSinks)
             delete[] dataSinks;
@@ -47,23 +47,31 @@ namespace astra_rocket
         // Setup logging first so we can log initialization progress
         setupLogging();
 
-        // Note: Sensors will be initialized by Astra::init() -> State::begin()
-        // No need to initialize them manually here
+        rocketState = config.getConfiguredRocketState();
+        if (rocketState)
+        {
+            LOGI("Using caller-provided RocketState.");
+        }
+        else
+        {
+            if (config.getConfiguredState() != nullptr)
+            {
+                LOGW("Configured state is not a RocketState. Replacing it with an internal RocketState.");
+            }
 
-        // Create Kalman filter for state estimation
-        kalmanFilter = new DefaultKalmanFilter();
-        LOGI("DefaultKalmanFilter created");
+            kalmanFilter = new DefaultKalmanFilter();
+            ownsKalmanFilter = true;
+            LOGI("DefaultKalmanFilter created");
 
-        // Create orientation filter for AHRS
-        // Using default gains: Kp=0.1, Ki=0.0005
-        orientationFilter = new MahonyAHRS(0.1, 0.0005);
-        LOGI("MahonyAHRS orientation filter created");
+            orientationFilter = new MahonyAHRS(0.1, 0.0005);
+            ownsOrientationFilter = true;
+            LOGI("MahonyAHRS orientation filter created");
 
-        // Create rocket state with Kalman filter and orientation filter
-        // Sensors are managed by Astra's SensorManager, not passed to RocketState
-        rocketState = new RocketState(kalmanFilter, orientationFilter, &config);
-        LOGI("RocketState created with Kalman filter and orientation filter");
-        config.withState(rocketState);
+            rocketState = new RocketState(kalmanFilter, orientationFilter, &config);
+            ownsRocketState = true;
+            LOGI("RocketState created with Kalman filter and orientation filter");
+            config.withState(rocketState);
+        }
 
         // Configure mode-dependent runtime behavior (HITL vs hardware)
         configureRuntimeMode();
@@ -110,9 +118,6 @@ namespace astra_rocket
 
     void AstraRocket::configureRuntimeMode()
     {
-        config.withDataLogs(dataSinks, numDataSinks);
-        config.withEventLogs(eventSinks, numEventSinks);
-
         if (config.getHITLEnabled())
         {
             configureHITLMode();
@@ -147,58 +152,79 @@ namespace astra_rocket
 
     void AstraRocket::setupLogging()
     {
-        // Create log sinks
-        dataSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS];
-        eventSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS];
+        const bool needsDataDefaults = config.getConfiguredDataLogCount() == 0;
+        const bool needsEventDefaults = config.getConfiguredEventLogCount() == 0;
 
-#if !defined(NATIVE)
-        // Mirror Astra event logs to the USB console during bring-up on embedded targets.
-        eventSinks[numEventSinks++] = new PrintLog(Serial, true);
-#endif
+        if (!needsDataDefaults && !needsEventDefaults)
+            return;
 
-#if defined(ENV_STM) && !defined(NATIVE)
-        // Store event logs on the configured STM32 storage backend (defaults to eMMC).
-        eventSinks[numEventSinks++] = new FileLogSink("events.log", config.getStorageBackend(), false);
-        dataSinks[numDataSinks++] = new FileLogSink("data.csv", config.getStorageBackend(), false);
-#endif
+        if (needsDataDefaults)
+            dataSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS]();
+        if (needsEventDefaults)
+            eventSinks = new ILogSink *[ASTRA_ROCKET_MAX_LOG_SINKS]();
 
-#if defined(ENV_TEENSY) && !defined(NATIVE)
-        // SD card is the only full telemetry/event sink.
-        FileLogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
-        FileLogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
-
-        eventSinks[numEventSinks++] = sdEventLog;
-        dataSinks[numDataSinks++] = sdDataLog;
-
-#endif
-        // Configure EventLogger (initializes event sinks). (initializes event sinks).
-        EventLogger::configure(eventSinks, numEventSinks);
-
-        // Event sink status summary
-        for (int i = 0; i < numEventSinks; i++)
+#if defined(NATIVE)
+        if (needsEventDefaults)
         {
-            if (eventSinks[i]->ok())
-            {
-                LOGI("Event sink %d ok.", i);
-            }
-            else
-            {
-                LOGW("Event sink %d FAILED", i);
-            }
+            ILogSink *serialEventLog = new PrintLog(Serial, true);
+            rememberOwnedSink(serialEventLog);
+            eventSinks[numEventSinks++] = serialEventLog;
         }
-        DataLogger::configure(dataSinks, numDataSinks);
-        // Data sink status summary (includes radio telemetry sink).
-        for (int i = 0; i < numDataSinks; i++)
+        if (needsDataDefaults)
         {
-            if (dataSinks[i]->ok())
-            {
-                LOGI("Data sink %d ok.", i);
-            }
-            else
-            {
-                LOGW("Data sink %d FAILED", i);
-            }
+            ILogSink *serialDataLog = new PrintLog(Serial, true);
+            rememberOwnedSink(serialDataLog);
+            dataSinks[numDataSinks++] = serialDataLog;
         }
+#else
+        if (needsEventDefaults)
+        {
+            ILogSink *usbEventLog = new PrintLog(Serial, true);
+            rememberOwnedSink(usbEventLog);
+            eventSinks[numEventSinks++] = usbEventLog;
+        }
+
+#if defined(ENV_STM)
+        if (needsEventDefaults)
+        {
+            ILogSink *stmEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
+            rememberOwnedSink(stmEventLog);
+            eventSinks[numEventSinks++] = stmEventLog;
+        }
+        if (needsDataDefaults)
+        {
+            ILogSink *stmDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
+            rememberOwnedSink(stmDataLog);
+            dataSinks[numDataSinks++] = stmDataLog;
+        }
+#elif defined(ENV_TEENSY)
+        if (needsEventDefaults)
+        {
+            ILogSink *sdEventLog = new FileLogSink("events.log", config.getStorageBackend(), false);
+            rememberOwnedSink(sdEventLog);
+            eventSinks[numEventSinks++] = sdEventLog;
+        }
+        if (needsDataDefaults)
+        {
+            ILogSink *sdDataLog = new FileLogSink("data.csv", config.getStorageBackend(), false);
+            rememberOwnedSink(sdDataLog);
+            dataSinks[numDataSinks++] = sdDataLog;
+        }
+#endif
+#endif
+
+        if (needsEventDefaults && numEventSinks > 0)
+            config.withEventLogs(eventSinks, numEventSinks);
+        if (needsDataDefaults && numDataSinks > 0)
+            config.withDataLogs(dataSinks, numDataSinks);
+    }
+
+    void AstraRocket::rememberOwnedSink(ILogSink *sink)
+    {
+        if (!sink || numOwnedLogSinks >= ASTRA_ROCKET_MAX_OWNED_LOG_SINKS)
+            return;
+
+        ownedLogSinks[numOwnedLogSinks++] = sink;
     }
 
 } // namespace astra_rocket
