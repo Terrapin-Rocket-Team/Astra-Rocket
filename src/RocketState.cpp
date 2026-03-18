@@ -647,7 +647,7 @@ namespace astra_rocket
 
         case EXPECTING_DROGUE:
             // Detect drogue deployment by sustained descent rate in valid range
-            if (velocity.z() < -DROGUE_DESCENT_MIN && velocity.z() > -DROGUE_DESCENT_MAX && timeInCurrentStage> 5.0)
+            if (velocity.z() < -DROGUE_DESCENT_MIN && velocity.z() > -DROGUE_DESCENT_MAX && timeInCurrentStage > 5.0)
             {
                 if (!drogueRateDetected)
                 {

@@ -147,7 +147,7 @@ private:
 
     // Descent rate detection thresholds
     static constexpr double DROGUE_DESCENT_MIN = 5.0;           // m/s minimum under drogue
-    static constexpr double DROGUE_DESCENT_MAX = 40.0;          // m/s maximum under drogue
+    static constexpr double DROGUE_DESCENT_MAX = 120.0;          // m/s maximum under drogue
     static constexpr double MAIN_DESCENT_MIN = 2.0;             // m/s minimum under main
     static constexpr double MAIN_DESCENT_MAX = 10.0;            // m/s maximum under main
     static constexpr double MAIN_DEPLOY_ALTITUDE = 400.0;       // m AGL to start expecting main
