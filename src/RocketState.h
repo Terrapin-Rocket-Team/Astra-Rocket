@@ -72,6 +72,7 @@ public:
      * Get time in current stage (seconds)
      */
     double getTimeInStage() const { return timeInCurrentStage; }
+    double getTimeSinceLaunch() const { return currentStage != PAD_IDLE ? currentTimeSeconds - timeOfLaunch : 0;}
 
     /**
      * Update orientation estimate from gyro and accel data
@@ -124,6 +125,7 @@ private:
     bool frameLocked;
     bool forceGyroOnly;
     SensorManager *sensorManager;
+    double timeOfLaunch = 0;
 
     // Helper methods
     void detectFlightStage();

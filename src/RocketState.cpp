@@ -572,6 +572,7 @@ namespace astra_rocket
                 }
                 else if (now - highAccelStartTime > liftoffDuration)
                 {
+                    timeOfLaunch = currentTimeSeconds;
                     newStage = BOOST;
                     LOGI("LIFTOFF DETECTED! Vertical accel: %0.2f G", acceleration.z());
 
