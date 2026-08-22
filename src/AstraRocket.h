@@ -13,6 +13,7 @@
 #include <Sensors/IMU/IMU9DoF.h>
 
 #include "AstraRocketConfig.h"
+#include "ArcCommandBridge.h"
 #include "RocketState.h"
 #include <Filters/DefaultKalmanFilter.h>
 #include "FlightStage.h"
@@ -88,6 +89,9 @@ namespace astra_rocket
          */
         Astra *getAstraSystem() { return astraSys; }
         SerialMessageRouter *getMessageRouter() { return astraSys ? astraSys->getMessageRouter() : nullptr; }
+        AstraRocketConfig &getConfig() { return config; }
+        bool isReady() const { return ready; }
+        ArcCommandBridge *getArcCommandBridge() { return arcBridge; }
 
     private:
         bool ready = false;
@@ -99,6 +103,7 @@ namespace astra_rocket
         RocketState *rocketState;
         DefaultKalmanFilter *kalmanFilter;
         MahonyAHRS *orientationFilter;
+        ArcCommandBridge *arcBridge;
 
         // Logging
         ILogSink **dataSinks;

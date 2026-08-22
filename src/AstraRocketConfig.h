@@ -124,6 +124,15 @@ public:
      */
     AstraRocketConfig& withRadioSerial(SerialUART_t &serial);
 
+    /**
+     * Enable ARC protocol command handling on a stream.
+     *
+     * This is intentionally separate from HITL. It gives the FC an ARC address
+     * and lets it respond to ARC NETMGMT/FC_COORD commands on the configured
+     * transport before simulator sample injection is wired in.
+     */
+    AstraRocketConfig& withArcProtocol(uint8_t addr, Stream &stream);
+
     // ===== Base Astra Configuration Pass-through =====
     // Note: All AstraConfig methods are now directly available through inheritance
 
@@ -150,6 +159,9 @@ public:
     uint8_t getConfiguredEventLogCount() const { return numEventLogs; }
 
     SerialUART_t* getRadioSerial() const { return radioSerial; }
+    Stream* getArcStream() const { return arcStream; }
+    uint8_t getArcAddress() const { return arcAddress; }
+    bool getArcEnabled() const { return arcEnabled && arcStream != nullptr; }
 
     RuntimeMode getRuntimeMode() const { return runtimeMode; }
     bool getSimulationEnabled() const { return runtimeMode != RuntimeMode::Hardware; }
@@ -177,6 +189,9 @@ private:
 
     // Radio configuration
     SerialUART_t *radioSerial;
+    Stream *arcStream;
+    uint8_t arcAddress;
+    bool arcEnabled;
     RocketState *configuredRocketState = nullptr;
 };
 

@@ -16,6 +16,7 @@ namespace astra_rocket
           rocketState(nullptr),
           kalmanFilter(nullptr),
           orientationFilter(nullptr),
+          arcBridge(nullptr),
           dataSinks(nullptr),
           eventSinks(nullptr),
           numDataSinks(0),
@@ -34,6 +35,8 @@ namespace astra_rocket
             delete kalmanFilter;
         if (ownsOrientationFilter && orientationFilter)
             delete orientationFilter;
+        if (arcBridge)
+            delete arcBridge;
         if (dataSinks)
             delete[] dataSinks;
         if (eventSinks)
@@ -84,6 +87,13 @@ namespace astra_rocket
             LOGW("Astra initialized with %d sensor error(s).", initErrors);
         }
         LOGI("Astra system initialized successfully. Reading sensors to establish baseline.");
+
+        if (config.getArcEnabled())
+        {
+            arcBridge = new ArcCommandBridge(config.getArcAddress(), config.getArcStream(), this);
+            arcBridge->begin();
+            LOGI("ARC command bridge enabled at address 0x%02X", config.getArcAddress());
+        }
 
         // Establish ground level reference
         if (config.getSimulationEnabled())
@@ -146,6 +156,8 @@ namespace astra_rocket
 
         // Astra::update() handles both hardware and HITL modes.
         astraSys->update();
+        if (arcBridge)
+            arcBridge->update();
     }
 
     // ===== Private Helper Methods =====

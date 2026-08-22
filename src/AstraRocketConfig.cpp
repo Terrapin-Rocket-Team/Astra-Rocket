@@ -1,5 +1,6 @@
 #include "AstraRocketConfig.h"
 #include "RocketState.h"
+#include <arc_protocol.h>
 
 namespace astra_rocket {
 
@@ -36,7 +37,10 @@ AstraRocketConfig::AstraRocketConfig()
       flightLogRate(50.0),
       postflightLogRate(1.0),
       flashBackup(false),
-      radioSerial(nullptr)
+      radioSerial(nullptr),
+      arcStream(nullptr),
+      arcAddress(ARC_ADDR_FC_N),
+      arcEnabled(false)
 {
 #ifdef ENV_TEENSY
     radioSerial = &Serial2;
@@ -115,6 +119,13 @@ AstraRocketConfig& AstraRocketConfig::withFlashBackup(bool enable) {
 // Radio configuration
 AstraRocketConfig& AstraRocketConfig::withRadioSerial(SerialUART_t &serial) {
     radioSerial = &serial;
+    return *this;
+}
+
+AstraRocketConfig& AstraRocketConfig::withArcProtocol(uint8_t addr, Stream &stream) {
+    arcAddress = addr;
+    arcStream = &stream;
+    arcEnabled = true;
     return *this;
 }
 

@@ -27,6 +27,10 @@
         {
             "name": "Astra",
             "version": "https://github.com/Terrapin-Rocket-Team/Astra.git#cleanup-ai-slop"
+        },
+        {
+            "name": "arc_protocol",
+            "version": "https://github.com/DrewBrandt/arc-protocol.git"
         }
     ],
     "frameworks": "*",
