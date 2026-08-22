@@ -4,34 +4,26 @@ title: User Manual - Introduction
 # Astra-Rocket User Manual
 
 !!! info
-    This documentation focuses on Astra-Rocket, which is built on top of Astra. Many of the Interfaces and Utilities described here come directly from Astra.
+    This documentation covers the rocket-specific layer. Use the
+    [Astra user guide](https://terrapin-rocket-team.github.io/Astra/) for
+    sensors, logging sinks, filters, math types, HITL/SITL transport, and
+    other base-library APIs.
 
 ---
 
-Astra-Rocket is a high-level flight computer framework tailored for rocketry. It provides a streamlined workflow while still giving you full access to Astra's underlying interfaces.
+Astra-Rocket is a high-level flight-computer framework tailored for rocketry.
+It supplies `AstraRocket`, `AstraRocketConfig`, `RocketState`, the
+`FlightStage` enum, and an optional ARC command bridge.
 
-The library is organized into two major categories:
+The normal application flow is:
 
----
+1. Create an `AstraRocketConfig`.
+2. Attach Astra sensor objects and optional logging sinks.
+3. Construct one `AstraRocket` with that config.
+4. Call `init()` once and `update()` continuously.
+5. Read `RocketState` for estimated state and the current flight phase.
 
-## Utilities
-
-Utilities are ready-to-use systems you typically do not need to modify.
-
-- **BlinkBuzz**: Non-blocking buzzer and LED patterns
-- **Logger**: Event logs and CSV telemetry
-- **Math**: Vectors, matrices, and quaternions
-- **AstraSystem**: Core system that coordinates sensors and state estimation
-
----
-
-## Interfaces
-
-Interfaces are base classes you extend for custom behavior or hardware.
-
-- **State**: The rocket state estimator and flight logic interface
-- **DataReporter**: Sources of telemetry data
-- **Sensor** and sensor types (Barometer, IMU, GPS, etc.)
-- **Filters**: Kalman and AHRS filters
-
-For most users, the [Basic Usage](basic-use.md) guide is the fastest way to get started.
+Start with [Installation](installation.md) and [Basic Usage](basic-use.md).
+Then review [Configuration](configuration.md) and
+[Flight Stages](flight-stages.md) before connecting the library to mission
+outputs.

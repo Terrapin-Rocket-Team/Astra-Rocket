@@ -1,8 +1,8 @@
 nav:
   - Intro: intro.md
-  - Installation: installation.md 
+  - Installation: installation.md
   - Basic Usage: basic-use.md
+  - Configuration: configuration.md
+  - Flight Stages: flight-stages.md
   - Troubleshooting: troubleshooting.md
   - FAQ: faq.md
-  - Utilities: utils
-  - Interfaces: ifaces

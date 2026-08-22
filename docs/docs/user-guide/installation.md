@@ -13,7 +13,8 @@ This guide assumes PlatformIO with the Arduino framework.
 
 ## Prerequisites
 
-- VS Code + PlatformIO extension
+- Git
+- PlatformIO Core, or VS Code with the PlatformIO extension
 - A supported board (Teensy 4.1, STM32, ESP32)
 - Basic C++ familiarity
 
@@ -71,7 +72,8 @@ build_flags =
 
 ## 3. Verify the Build
 
-Create a basic `main.cpp` and build the project.
+Create a basic `main.cpp` and build the project. This verifies dependency and
+header resolution only; a flight-ready configuration requires real sensors.
 
 ```cpp title="src/main.cpp"
 #include <Arduino.h>
@@ -79,11 +81,11 @@ Create a basic `main.cpp` and build the project.
 
 using namespace astra_rocket;
 
-AstraRocket rocket;
+AstraRocketConfig config;
+AstraRocket rocket(config);
 
 void setup() {
     Serial.begin(115200);
-    rocket.init();
 }
 
 void loop() {
@@ -91,4 +93,16 @@ void loop() {
 }
 ```
 
-If the build succeeds, Astra-Rocket is installed correctly.
+If the build succeeds, Astra-Rocket is installed correctly. Continue to
+[Basic Usage](basic-use.md) before calling `init()`.
+
+For a checkout of Astra-Rocket itself, use the shared CLI to run the maintained
+matrix:
+
+```bash
+astra-support doctor --project .
+astra-support test --project . --clean --no-progress
+```
+
+The result covers compilation and native tests, not hardware upload or flight
+validation.

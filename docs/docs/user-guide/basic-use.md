@@ -20,7 +20,7 @@ Create a PlatformIO project and add Astra-Rocket to `lib_deps` as shown in [Inst
 
 ---
 
-## 3. Choose or Implement Sensors
+## 3. Choose Sensors
 
 ### Use a Supported Sensor
 
@@ -38,75 +38,9 @@ DPS368 baro;
 MAX_M10S gps;
 ```
 
-### Write a Sensor Wrapper (Custom Hardware)
-
-If your sensor is not supported, create a thin wrapper by inheriting from the correct Astra interface. The existing wrappers in Astra's `src/Sensors/HW/` folder are the best reference. Astra has the most up-to-date examples; some Astra-Rocket examples lag behind.
-
-**Example: IMU6DoF wrapper**
-
-```cpp title="lib/MyIMU/MyIMU.h"
-#pragma once
-
-#include <Sensors/IMU/IMU6DoF.h>
-#include <Wire.h>
-#include <MyVendorIMU.h>
-
-using namespace astra;
-
-class MyIMU : public IMU6DoF {
-public:
-    explicit MyIMU(TwoWire* bus = &Wire)
-        : IMU6DoF("MyIMU"), driver(*bus) {}
-
-    int init() override {
-        if (!driver.begin()) {
-            return -1;
-        }
-        return 0;
-    }
-
-    int read() override {
-        driver.read();
-        acc = Vector<3>(driver.ax_mss(), driver.ay_mss(), driver.az_mss());
-        angVel = Vector<3>(driver.gx_rads(), driver.gy_rads(), driver.gz_rads());
-        return 0;
-    }
-
-private:
-    MyVendorIMU driver;
-};
-```
-
-**Example: Barometer wrapper**
-
-```cpp title="lib/MyBaro/MyBaro.h"
-#pragma once
-
-#include <Sensors/Baro/Barometer.h>
-#include <MyVendorBaro.h>
-
-using namespace astra;
-
-class MyBaro : public Barometer {
-public:
-    MyBaro() : Barometer("MyBaro") {}
-
-    int init() override {
-        return driver.begin() ? 0 : -1;
-    }
-
-    int read() override {
-        driver.read();
-        altitudeM = driver.altitude_m();
-        pressurePa = driver.pressure_pa();
-        temperatureC = driver.temperature_c();
-        return 0;
-    }
-
-private:
-    MyVendorBaro driver;
-};
-```
+If hardware is not already supported, follow Astra's
+[Sensor Interface](https://terrapin-rocket-team.github.io/Astra/user-guide/ifaces/sensor/)
+guide. Astra owns custom sensor wrappers; Astra-Rocket only consumes them.
 
 ---
 
@@ -126,7 +60,8 @@ You can set orientation for IMUs, accelerometers, gyros, and magnetometers. If y
 
 ## 5. Integrate Sensors into Astra-Rocket
 
-Create an `AstraRocketConfig` and pass your sensors in. Use the IMU convenience helpers when possible:
+Create an `AstraRocketConfig`, then configure it in a separate statement. This
+is important because inherited Astra builder methods return `AstraConfig&`.
 
 ```cpp title="src/main.cpp"
 #include <Arduino.h>
@@ -142,8 +77,11 @@ BMI088 imu;
 DPS368 baro;
 MAX_M10S gps;
 
-AstraRocketConfig config = AstraRocketConfig()
-    .with6DoFIMU(&imu)
+AstraRocketConfig config;
+
+// Configure rocket-specific values before or separately from Astra values.
+config.withFlightLogRate(50);
+config.with6DoFIMU(&imu)
     .withBaro(&baro)
     .withGPS(&gps)
     .withStatusLED(25)
@@ -167,7 +105,7 @@ void setup() {
     // Set sensor orientation before init()
     imu.setMountingOrientation(MountingOrientation::ROTATE_90_Z);
 
-    if (!rocket.init()) {
+if (!rocket.init()) {
         while (1) {
             delay(1000);
         }
@@ -181,6 +119,20 @@ void loop() {
 
 ---
 
+## 7. Read Rocket State
+
+```cpp
+RocketState* state = rocket.getRocketState();
+if (state != nullptr) {
+    FlightStage stage = state->getFlightStage();
+    double altitudeAGL = state->getAltitudeAGL();
+    Vector<3> velocity = state->getVelocity();
+}
+```
+
+See [Flight Stages](flight-stages.md) before using stage transitions in mission
+logic.
+
 ## Notes on Examples
 
 Astra's `Sensors/HW` wrappers and documentation are kept more current than Astra-Rocket's example sketches. When in doubt, use Astra's sensor wrappers and the latest Astra docs as your reference.
@@ -189,5 +141,6 @@ Astra's `Sensors/HW` wrappers and documentation are kept more current than Astra
 
 ## Next Steps
 
-- [Utilities](utils)
-- [Interfaces](ifaces)
+- [Configuration](configuration.md)
+- [Flight Stages](flight-stages.md)
+- [Astra user guide](https://terrapin-rocket-team.github.io/Astra/)

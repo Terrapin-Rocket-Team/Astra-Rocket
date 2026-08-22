@@ -5,15 +5,25 @@ hide: footer
 
 # Astra-Rocket Documentation
 
-Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework built on top of Astra. It provides a batteries-included workflow for rockets: sensor initialization, state estimation, flight-stage logic, and logging are wired for you so you can focus on mission-specific behavior.
+Astra-Rocket is the Terrapin Rocket Team's rocket-specific layer built on top
+of [Astra](https://terrapin-rocket-team.github.io/Astra/). It combines Astra's
+sensor and state-estimation APIs with rocket flight-stage detection,
+flight-oriented logging defaults, and optional ARC command handling.
+
+!!! warning "Recovery detection is not deployment control"
+    Astra-Rocket reports expected and observed recovery phases. It does not
+    energize pyrotechnic or actuator outputs. Mission firmware must implement
+    and validate deployment safety separately.
 
 ---
 
 ## What Astra-Rocket Gives You
 
 - **Simple flight computer setup**: minimal `setup()` and `loop()` with one `AstraRocket` object
-- **Sensor abstraction**: configure supported IMU, barometer, GPS, magnetometer, and high-G accelerometers through a common interface
-- **Flight-stage tracking**: PAD -> BOOST -> COAST -> APOGEE -> DESCENT -> LANDING
+- **Astra integration**: configure Astra IMU, barometer, GPS, magnetometer, and
+  miscellaneous sensor objects through one config
+- **Flight-stage tracking**: pad, boost, coast, apogee, expected/observed
+  drogue, expected/observed main, and landed
 - **Logging defaults**: platform-appropriate serial and storage sinks, plus configurable logging rates
 - **HITL ready**: easy Hardware-In-The-Loop mode for simulation and testing
 
@@ -23,7 +33,8 @@ Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework 
 
 1. Read [Installation](user-guide/installation.md)
 2. Follow [Basic Usage](user-guide/basic-use.md)
-3. Explore the Interfaces and Utilities for advanced customization
+3. Review [Configuration](user-guide/configuration.md)
+4. Understand [Flight Stages](user-guide/flight-stages.md)
 
 ---
 
@@ -34,9 +45,10 @@ Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework 
 - `AstraRocketConfig` extends `AstraConfig` with flight-specific settings
 - `RocketState` runs Kalman + Mahony filters for position/velocity/orientation
 
-**Sensors**
-- Uses Astra's sensor interfaces (`Accel`, `Gyro`, `Mag`, `Barometer`, `GPS`, `IMU`)
-- Custom hardware is supported via thin wrapper classes
+**Astra**
+- Owns sensor interfaces, hardware wrappers, state estimation, logging, and
+  HITL/SITL transport
+- Its documentation is authoritative for those APIs
 
 **Logging**
 - Event logs and telemetry logs are configured automatically
@@ -48,5 +60,6 @@ Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework 
 
 - [Installation](user-guide/installation.md)
 - [Basic Usage](user-guide/basic-use.md)
-- [Utilities](user-guide/utils)
-- [Interfaces](user-guide/ifaces)
+- [Configuration](user-guide/configuration.md)
+- [Flight Stages](user-guide/flight-stages.md)
+- [Astra user guide](https://terrapin-rocket-team.github.io/Astra/)

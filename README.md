@@ -1,9 +1,13 @@
 # Astra-Rocket
 
-An Arduino library that adds rocket flight states, events, deployment control,
-and ARC command handling to [Astra](https://github.com/Terrapin-Rocket-Team/Astra).
+An Arduino library that adds rocket flight-state detection, flight-oriented
+logging defaults, and ARC command handling to
+[Astra](https://github.com/Terrapin-Rocket-Team/Astra).
 Astra-Rocket is the foundation consumed by the team's current flight-computer
 projects.
+
+It detects recovery phases; it does **not** fire deployment hardware. Pyro and
+actuator safety logic remains the responsibility of mission firmware.
 
 ## Install in a PlatformIO project
 
@@ -36,4 +40,10 @@ require the corresponding device and are not included.
 
 ## Documentation
 
-See our [documentation](https://terrapin-rocket-team.github.io/Astra-Rocket/) for information on how to install and use.
+See the [Astra-Rocket user guide](https://terrapin-rocket-team.github.io/Astra-Rocket/)
+for installation, configuration, flight stages, and troubleshooting. Use the
+[Astra documentation](https://terrapin-rocket-team.github.io/Astra/) for
+sensor, logging, filter, and math APIs inherited from Astra.
+
+The current end-to-end firmware integration is documented in
+[SRAD-Avionics](https://github.com/Terrapin-Rocket-Team/SRAD-Avionics).
