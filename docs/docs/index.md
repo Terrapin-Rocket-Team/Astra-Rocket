@@ -5,16 +5,16 @@ hide: footer
 
 # Astra-Rocket Documentation
 
-Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework built on top of TRT-Astra. It provides a batteries-included workflow for rockets: sensor initialization, state estimation, flight-stage logic, and logging are wired for you so you can focus on mission-specific behavior.
+Astra-Rocket is the Terrapin Rocket Team's high-level flight computer framework built on top of Astra. It provides a batteries-included workflow for rockets: sensor initialization, state estimation, flight-stage logic, and logging are wired for you so you can focus on mission-specific behavior.
 
 ---
 
 ## What Astra-Rocket Gives You
 
 - **Simple flight computer setup**: minimal `setup()` and `loop()` with one `AstraRocket` object
-- **Sensor auto-detection**: use supported IMU, barometer, GPS, magnetometer, and high-G accelerometers without extra glue
+- **Sensor abstraction**: configure supported IMU, barometer, GPS, magnetometer, and high-G accelerometers through a common interface
 - **Flight-stage tracking**: PAD -> BOOST -> COAST -> APOGEE -> DESCENT -> LANDING
-- **Logging out of the box**: preflight, flight, and postflight logging rates
+- **Logging defaults**: platform-appropriate serial and storage sinks, plus configurable logging rates
 - **HITL ready**: easy Hardware-In-The-Loop mode for simulation and testing
 
 ---

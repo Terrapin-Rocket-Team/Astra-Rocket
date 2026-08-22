@@ -17,7 +17,7 @@ class RocketState;
  * AstraRocketConfig: Configuration builder for rocket flight computers
  *
  * Extends AstraConfig with rocket-specific configuration options:
- * - Sensor selection (with auto-detection fallback)
+ * - Sensor selection and wiring
  * - Flight detection thresholds
  * - Pyro channel configuration
  * - Deployment logic parameters

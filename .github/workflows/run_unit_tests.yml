@@ -1,6 +1,8 @@
-name: Run Unit Tests
+name: Run Astra Support
 
-on: [push]
+on:
+  pull_request:
+  push:
 
 jobs:
   test:
@@ -12,12 +14,18 @@ jobs:
         with:
           path: |
             ~/.cache/pip
-            ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
+            ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install PlatformIO Core
-        run: pip install --upgrade platformio
-      - name: Run Unity Tests
-        run: pio test -e native
+      - name: Install pipx
+        run: pip install --upgrade pipx
+      - name: Install Astra Support CLI
+        run: pipx install "git+https://github.com/Terrapin-Rocket-Team/Astra-Support.git@main"
+      - name: Run doctor
+        run: astra-support doctor --project .
+      - name: Run managed tests
+        run: astra-support test --project . --clean --no-progress

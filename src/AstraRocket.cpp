@@ -10,6 +10,19 @@
 
 namespace astra_rocket
 {
+    namespace
+    {
+        AstraRocketConfig &defaultConfig()
+        {
+            static AstraRocketConfig config;
+            return config;
+        }
+    }
+
+    AstraRocket::AstraRocket() : AstraRocket(defaultConfig())
+    {
+    }
+
     AstraRocket::AstraRocket(AstraRocketConfig &cfg)
         : config(cfg),
           astraSys(nullptr),

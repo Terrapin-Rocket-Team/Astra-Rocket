@@ -26,10 +26,10 @@ namespace astra_rocket
     /**
      * AstraRocket: High-level rocketry flight computer wrapper
      *
-     * Provides a simple interface for rocket flight computers built on TRT-Astra.
+     * Provides a simple interface for rocket flight computers built on Astra.
      * Features:
-     * - Automatic sensor detection and initialization
-     * - Flight-aware logging with automatic file management
+     * - Configured sensor initialization and update orchestration
+     * - Default serial and storage logging sinks
      * - Flight stage detection and tracking
      * - Recovery event detection (based on descent rate changes)
      *
@@ -43,7 +43,7 @@ namespace astra_rocket
     public:
         /**
          * Default constructor
-         * Uses auto-detected sensors and default configuration
+         * Uses default configuration; mission sensors must still be configured
          */
         AstraRocket();
 
@@ -60,8 +60,7 @@ namespace astra_rocket
 
         /**
          * Initialize the flight computer
-         * - Auto-detects sensors (if not specified in config)
-         * - Initializes all sensors
+         * - Initializes configured sensors
          * - Sets up logging
          * - Performs pre-flight checks
          *

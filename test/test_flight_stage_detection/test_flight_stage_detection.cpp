@@ -382,13 +382,13 @@ void test_drogue_at_min_boundary() {
 }
 
 void test_drogue_at_max_boundary() {
-    // Test drogue at maximum descent rate (just below 40 m/s)
+    // Test drogue at maximum descent rate (just below 120 m/s)
     setStateAndUpdate(1000.0, 0.0, 0);
     state->setFlightStage(FlightStage::EXPECTING_DROGUE);
 
-    // 39.9 m/s descent (needs to be < 40.0)
-    setStateAndUpdate(500.0, -39.9, 10000);
-    setStateAndUpdate(420.2, -39.9, 12010);
+    // 119.9 m/s descent (needs to be < 120.0)
+    setStateAndUpdate(500.0, -119.9, 10000);
+    setStateAndUpdate(260.2, -119.9, 12010);
 
     TEST_ASSERT_EQUAL(FlightStage::UNDER_DROGUE, state->getFlightStage());
 }
@@ -407,13 +407,13 @@ void test_drogue_too_slow_no_detection() {
 }
 
 void test_drogue_too_fast_ballistic() {
-    // Test that ballistic descent (> 40 m/s) doesn't indicate drogue
+    // Test that ballistic descent (> 120 m/s) doesn't indicate drogue
     setStateAndUpdate(1000.0, 0.0, 0);
     state->setFlightStage(FlightStage::EXPECTING_DROGUE);
 
-    // 60 m/s - ballistic descent (drogue failed)
-    setStateAndUpdate(500.0, -60.0, 10000);
-    setStateAndUpdate(380.0, -60.0, 12100);
+    // 130 m/s - ballistic descent (drogue failed)
+    setStateAndUpdate(500.0, -130.0, 10000);
+    setStateAndUpdate(240.0, -130.0, 12100);
 
     // Should remain in EXPECTING_DROGUE
     TEST_ASSERT_EQUAL(FlightStage::EXPECTING_DROGUE, state->getFlightStage());
@@ -445,7 +445,7 @@ void test_drogue_velocity_fluctuation() {
 
     // Wait 1.5 seconds, then velocity goes out of range
     setStateAndUpdate(470.0, -20.0, 11500);
-    setStateAndUpdate(468.0, -50.0, 11600); // Too fast!
+    setStateAndUpdate(468.0, -130.0, 11600); // Too fast!
 
     // Come back to valid range
     setStateAndUpdate(460.0, -20.0, 11700);
@@ -759,17 +759,19 @@ void test_complete_nominal_flight_sequence() {
     TEST_ASSERT_EQUAL(FlightStage::EXPECTING_DROGUE, state->getFlightStage());
 
     // 6. UNDER_DROGUE
-    setStateAndUpdate(450.0, -20.0, 12000);
-    setStateAndUpdate(410.0, -20.0, 14020);
+    // Drogue detection is armed five seconds after entering EXPECTING_DROGUE,
+    // then requires two seconds of sustained in-range descent.
+    setStateAndUpdate(450.0, -20.0, 16000);
+    setStateAndUpdate(410.0, -20.0, 18020);
     TEST_ASSERT_EQUAL(FlightStage::UNDER_DROGUE, state->getFlightStage());
 
     // 7. EXPECTING_MAIN (altitude trigger)
-    setStateAndUpdate(390.0, -20.0, 15000);
+    setStateAndUpdate(390.0, -20.0, 19000);
     TEST_ASSERT_EQUAL(FlightStage::EXPECTING_MAIN, state->getFlightStage());
 
     // 8. UNDER_MAIN
-    setStateAndUpdate(350.0, -5.0, 16000);
-    setStateAndUpdate(340.0, -5.0, 18020);
+    setStateAndUpdate(350.0, -5.0, 20000);
+    setStateAndUpdate(340.0, -5.0, 22020);
     TEST_ASSERT_EQUAL(FlightStage::UNDER_MAIN, state->getFlightStage());
 
     // 9. LANDED

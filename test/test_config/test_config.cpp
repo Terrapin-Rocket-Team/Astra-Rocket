@@ -4,6 +4,7 @@
 
 // include other headers you need to test here
 #include "../../src/AstraRocketConfig.h"
+#include "../../src/AstraRocket.h"
 
 using namespace astra_rocket;
 using namespace astra;
@@ -48,6 +49,11 @@ void test_config_default_values() {
     TEST_ASSERT_EQUAL_DOUBLE(50.0, config.getFlightLogRate());
     TEST_ASSERT_EQUAL_DOUBLE(1.0, config.getPostflightLogRate());
     TEST_ASSERT_FALSE(config.getFlashBackup());
+}
+
+void test_default_rocket_constructor_is_linked() {
+    AstraRocket rocket;
+    TEST_ASSERT_FALSE(rocket.isReady());
 }
 
 void test_config_with_liftoff_threshold() {
@@ -240,6 +246,7 @@ int main(int argc, char **argv)
 
     // Add your tests here
     RUN_TEST(test_config_default_values);
+    RUN_TEST(test_default_rocket_constructor_is_linked);
     RUN_TEST(test_config_with_liftoff_threshold);
     RUN_TEST(test_config_with_liftoff_duration);
     RUN_TEST(test_config_with_burnout_threshold);

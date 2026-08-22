@@ -242,13 +242,14 @@ void test_off_vertical_angle_zero_acceleration() {
 }
 
 void test_pad_alignment_and_frame_lock() {
-    // Body +X points up (rotate -90 deg about Y)
-    Quaternion q;
-    q.fromAxisAngle(Vector<3>(0, 1, 0), -M_PI / 2.0);
-    orientationFilter->setMockOrientation(q);
+    // Board +X points along the rocket's upward axis.
+    const Vector<3> gyro(0.0, 0.0, 0.0);
+    const Vector<3> accel(9.81, 0.0, 0.0);
 
-    // Hold on pad long enough to pass hysteresis
+    // Feed pad accelerometer samples through the production alignment path
+    // long enough to pass its hysteresis.
     for (int i = 0; i < 12; i++) {
+        state->updateOrientation(gyro, accel, 0.02);
         setStateAndUpdate(0.0, 0.0, -9.81, 100 + i * 20);
     }
 

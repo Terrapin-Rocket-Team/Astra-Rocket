@@ -4,7 +4,7 @@ title: User Manual - Introduction
 # Astra-Rocket User Manual
 
 !!! info
-    This documentation focuses on Astra-Rocket, which is built on top of TRT-Astra. Many of the Interfaces and Utilities described here come directly from Astra.
+    This documentation focuses on Astra-Rocket, which is built on top of Astra. Many of the Interfaces and Utilities described here come directly from Astra.
 
 ---
 

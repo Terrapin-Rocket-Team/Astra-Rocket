@@ -246,6 +246,6 @@ Make sure the HITL packet format matches exactly. The parser expects 18 comma-se
 
 ## References
 
-- [HITL Framework Documentation](../../.pio/libdeps/teensy41/TRT-Astra/src/Sensors/HITL/README.md)
+- [HITL Framework Documentation](https://github.com/Terrapin-Rocket-Team/Astra/tree/main/src/Sensors/HITL)
 - [Astra-Rocket Documentation](../../docs/)
-- [TRT-Astra Library](https://github.com/Terrapin-Rocket-Team/TRT-Astra)
+- [Astra Library](https://github.com/Terrapin-Rocket-Team/Astra)

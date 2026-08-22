@@ -15,7 +15,7 @@ class AstraRocketConfig;
 /**
  * RocketState: Rocket-specific state estimator
  *
- * Extends TRT-Astra's State class with rocket flight-specific variables:
+ * Extends Astra's State class with rocket flight-specific variables:
  * - Flight stage detection and tracking
  * - Apogee estimation and prediction
  * - Vertical acceleration and velocity tracking
