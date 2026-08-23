@@ -47,3 +47,6 @@ sensor, logging, filter, and math APIs inherited from Astra.
 
 The current end-to-end firmware integration is documented in
 [SRAD-Avionics](https://github.com/Terrapin-Rocket-Team/SRAD-Avionics).
+Use its
+[flight-software workflow](https://github.com/Terrapin-Rocket-Team/SRAD-Avionics/blob/main/docs/software-stack.md)
+for the complete clean install, validation, SITL, HITL, and handoff sequence.

@@ -63,3 +63,5 @@ flight-oriented logging defaults, and optional ARC command handling.
 - [Configuration](user-guide/configuration.md)
 - [Flight Stages](user-guide/flight-stages.md)
 - [Astra user guide](https://terrapin-rocket-team.github.io/Astra/)
+- [Complete install-to-HITL workflow](https://github.com/Terrapin-Rocket-Team/SRAD-Avionics/blob/main/docs/software-stack.md)
+- [Airbrake application](https://github.com/Terrapin-Rocket-Team/Airbrake)
